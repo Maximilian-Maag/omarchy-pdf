@@ -1,0 +1,34 @@
+#!/bin/bash
+# omarchy:summary=Sign a PDF with a qualified electronic signature (eIDAS Fernsignatur)
+# omarchy:args=[pdf-file]
+# omarchy:examples=omarchy pdf sign ~/Vertrag.pdf
+
+# A QES certificate lives at a Vertrauensdiensteanbieter, never locally, so this
+# opens the D-Trust sign-me portal in the *default* browser and reminds the user
+# which document to upload. Identification is done once with the Online-Ausweis;
+# the signature itself is then produced in the portal.
+
+set -euo pipefail
+
+PORTAL="https://www.sign-me.de/"
+
+notify() {
+  if command -v omarchy-notification-send >/dev/null 2>&1; then
+    omarchy-notification-send -u low "$1"
+  fi
+}
+
+file="${1:-}"
+
+if [[ -n $file && ! -f $file ]]; then
+  echo "omarchy-pdf-sign: no such file: $file" >&2
+  exit 1
+fi
+
+if [[ -n $file ]]; then
+  notify "sign-me: $(basename "$file") hochladen und signieren"
+else
+  notify "sign-me: Portal geoeffnet - PDF hochladen und signieren"
+fi
+
+exec xdg-open "$PORTAL"

@@ -1,0 +1,67 @@
+#!/bin/bash
+# omarchy:summary=Toggle Papers (PDF) night mode — dark <-> light rendering
+# omarchy:args=[on|off|toggle|--status]
+# omarchy:examples=omarchy toggle pdf-night | omarchy toggle pdf-night on
+
+# Papers stores the render inversion as one global boolean; flipping it re-renders
+# every open document, so a keybinding to this command is the whole dark-mode feature.
+# Reading it back is what --status reports, which is also how a bar widget would ask.
+
+set -euo pipefail
+
+SCHEMA="org.gnome.Papers"
+KEY="night-mode"
+
+usage() {
+  echo "Usage: omarchy-toggle-pdf-night [on|off|toggle|--status]" >&2
+}
+
+notify() {
+  if command -v omarchy-notification-send >/dev/null 2>&1; then
+    omarchy-notification-send -u low "$1"
+  fi
+}
+
+read_state() {
+  gsettings get "$SCHEMA" "$KEY" 2>/dev/null || echo false
+}
+
+action="${1:-toggle}"
+
+case $action in
+  --status)
+    current="$(read_state)"
+    enabled=false
+    if [[ $current == true ]]; then
+      enabled=true
+    fi
+    printf '{"mode":"night","enabled":%s}\n' "$enabled"
+    exit 0
+    ;;
+  on)
+    target=true
+    ;;
+  off)
+    target=false
+    ;;
+  toggle)
+    current="$(read_state)"
+    if [[ $current == true ]]; then
+      target=false
+    else
+      target=true
+    fi
+    ;;
+  *)
+    usage
+    exit 1
+    ;;
+esac
+
+gsettings set "$SCHEMA" "$KEY" "$target"
+
+if [[ $target == true ]]; then
+  notify "PDF: Dunkelmodus (dark)"
+else
+  notify "PDF: Hellmodus (light)"
+fi

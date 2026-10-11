@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=sign-me (QES signieren)
+GenericName=Qualifizierte elektronische Signatur
+Comment=PDF mit qualifizierter elektronischer Signatur signieren (eIDAS-Fernsignatur, D-Trust sign-me)
+Exec=omarchy-pdf-sign %f
+Icon=application-pdf
+Terminal=false
+Categories=Office;Utility;
+MimeType=application/pdf;
+Keywords=signieren;Signatur;QES;eIDAS;PDF;sign-me;
+StartupNotify=true

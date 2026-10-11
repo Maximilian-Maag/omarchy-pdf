@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "id": "Maximilian-Maag.pdf",
+  "name": "PDF",
+  "version": "1.0.0",
+  "author": "Maximilian-Maag",
+  "license": "MIT",
+  "description": "A better PDF experience for Omarchy \u2014 Papers as the default viewer with form filling, a Super+Ctrl+N dark/light render toggle (night mode on by default), and QES signing via the D-Trust sign-me portal opened in the default browser.",
+  "kinds": [
+    "cli"
+  ],
+  "activation": "auto",
+  "entryPoints": {},
+  "omarchy_meta": {
+    "installPaths": [
+      {
+        "source": "bin/omarchy-toggle-pdf-night",
+        "target": "bin/omarchy-toggle-pdf-night"
+      },
+      {
+        "source": "bin/omarchy-webapp-qutebrowser",
+        "target": "bin/omarchy-webapp-qutebrowser"
+      },
+      {
+        "source": "bin/omarchy-pdf-sign",
+        "target": "bin/omarchy-pdf-sign"
+      }
+    ],
+    "bindings": [
+      {
+        "keys": "SUPER + D",
+        "description": "Documents (Papers)"
+      },
+      {
+        "keys": "SUPER + CTRL + N",
+        "description": "PDF dark/light toggle"
+      },
+      {
+        "keys": "SUPER + SHIFT + Q",
+        "description": "sign-me (QES signieren)"
+      }
+    ]
+  }
+}

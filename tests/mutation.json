@@ -1,0 +1,72 @@
+{
+  "_about": [
+    "Mutation-test targets for this plugin. Each target names the file to mutate and",
+    "the test command that must notice a change (the fast suite that covers it).",
+    "Run with tools/mutator.py, or as part of tools/run_tests.sh.",
+    "min_kill_rate is the floor: below it the run fails, and a target that yields no",
+    "mutants at all fails too, so a mutation pass can never be green over nothing.",
+    "per_operator caps how many occurrences of each operator are mutated (determinism",
+    "and runtime); raise it for a deeper nightly run via --max-rate/--only.",
+    "equivalent lists survivors that were PROVEN unobservable by applying the mutant",
+    "and diffing the target's full test output against the baseline (they are excluded",
+    "from the denominator, never counted as kills) — each names its (line, kind) and a",
+    "reason. exempt lists shipped sources deliberately not mutated, each with a reason;",
+    "policy_check's tests/no-gaps rule requires every source_globs match to be accounted",
+    "for here or be a target."
+  ],
+  "min_kill_rate": 0.85,
+  "timeout": 120,
+  "per_operator": 2,
+  "targets": [
+    {
+      "path": "bin/omarchy-toggle-pdf-night",
+      "lang": "shell",
+      "tests": ["bash", "tests/shell/test_toggle_pdf_night.sh"],
+      "equivalent": [
+        {
+          "line": 20,
+          "kind": "number±1",
+          "reason": "notify()'s guard redirects to /dev/null; 2>&1 -> 3>&1 only opens an unused fd3 and discards the same empty `command -v` output — proven identical by diffing the full test output"
+        }
+      ]
+    },
+    {
+      "path": "bin/omarchy-webapp-qutebrowser",
+      "lang": "shell",
+      "tests": ["bash", "tests/shell/test_webapp_qutebrowser.sh"],
+      "equivalent": [
+        {
+          "line": 22,
+          "kind": "number±1",
+          "reason": "dry_run is only ever tested with [[ -n $dry_run ]], so the sentinel 1 vs 2 is indistinguishable — proven identical by diffing the full test output"
+        }
+      ]
+    },
+    {
+      "path": "bin/omarchy-pdf-sign",
+      "lang": "shell",
+      "tests": ["bash", "tests/shell/test_pdf_sign.sh"],
+      "equivalent": [
+        {
+          "line": 16,
+          "kind": "number±1",
+          "reason": "notify()'s guard redirects to /dev/null; 2>&1 -> 3>&1 opens an unused fd3 and 2>&1 -> 2>&2 is a self-duplication no-op, both discarding the same empty `command -v` output — proven identical by diffing the full test output"
+        }
+      ]
+    }
+  ],
+  "exempt": [
+    {
+      "path": "install.sh",
+      "reason": "privileged installer (sudo/pkexec, /usr/local/bin); mutating it meaningfully needs a root harness, wiring is verified by review"
+    },
+    {
+      "path": "tools/policy_check.py",
+      "reason": "vendored checker, byte-identical to omarchy-qutebrowser's; covered by that repo's mutation suite"
+    },
+    {
+      "path": "tools/mutator.py",
+      "reason": "vendored mutation runner, byte-identical to omarchy-qutebrowser's; covered by that repo's mutation suite"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Chromium (routed to qutebrowser)
+Comment=Omarchy web-app fallback redirected to qutebrowser by omarchy-pdf (Chromium removed)
+Exec=omarchy-webapp-qutebrowser
+Icon=org.qutebrowser.qutebrowser
+Terminal=false
+NoDisplay=true

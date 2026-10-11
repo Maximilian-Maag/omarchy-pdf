@@ -1,0 +1,36 @@
+#!/bin/bash
+# omarchy:summary=Launch a URL as a web app in qutebrowser (Chromium-free Omarchy)
+# omarchy:args=--app=<url> [--dry-run]
+# omarchy:examples=omarchy-webapp-qutebrowser --app=https://example.com
+
+# Omarchy's omarchy-launch-webapp falls back to chromium.desktop for its --app=
+# windows. With Chromium removed this shim is installed as the Exec named by a
+# user-level chromium.desktop, so that path opens in qutebrowser instead.
+# --dry-run prints the command it would run, which is how it is tested.
+
+set -euo pipefail
+
+url=""
+dry_run=""
+
+for arg in "$@"; do
+  case $arg in
+    --app=*)
+      url="${arg#--app=}"
+      ;;
+    --dry-run)
+      dry_run=1
+      ;;
+  esac
+done
+
+if [[ -z $url ]]; then
+  exec qutebrowser
+fi
+
+if [[ -n $dry_run ]]; then
+  printf 'qutebrowser --target window %s\n' "$url"
+  exit 0
+fi
+
+exec qutebrowser --target window "$url"
