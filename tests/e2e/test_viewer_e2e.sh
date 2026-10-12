@@ -7,7 +7,20 @@
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-PY="${OMARCHY_PDF_TEST_PYTHON:-/usr/bin/python3}"
+
+# Pick an interpreter that actually has PyQt6.QtPdf (the system python may; a
+# mise/pyenv python may not; CI installs the PyQt6 wheel). Where none exists the
+# suite SKIPS rather than failing, matching the other environment-gated e2e.
+PY="${OMARCHY_PDF_TEST_PYTHON:-}"
+if [[ -z $PY ]]; then
+  for candidate in /usr/bin/python3 python3; do
+    if "$candidate" -c 'import PyQt6.QtPdf' >/dev/null 2>&1; then PY="$candidate"; break; fi
+  done
+fi
+if [[ -z $PY ]]; then
+  echo "  skip: no python3 with PyQt6.QtPdf (install PyQt6 / python-pyqt6)"
+  exit 0
+fi
 export QT_QPA_PLATFORM=offscreen
 
 pass=0

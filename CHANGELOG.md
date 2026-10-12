@@ -2,6 +2,22 @@
 
 All notable changes to omarchy-pdf are documented here.
 
+## [2.0.1] — 2026-10-12
+
+### Fixed
+- **CI was red on the 2.0.0 commit** for a reason the local run hid: the workflow
+  installed nothing, so `qpdf` and PyQt6/QtPdf were absent on the runner. The
+  authoring path (`pdf/pdffile.py`) and the offscreen Qt suites were therefore
+  skipped, and `pdf/pdffile.py` read **0.78 < 0.85**. The workflow now installs the
+  runtime deps (`qpdf`, the PyQt6 wheel — which carries QtPdf, unlike Ubuntu's
+  `python3-pyqt6` — and the libs an offscreen Qt needs).
+- `pdf/pdffile.py`'s pure paths (`incremental_update`, `_page_object`, the
+  `_normalise` failure branch) now have qpdf-free unit tests, so their mutants die
+  even where `qpdf` is absent — the score no longer depends on an external tool
+  being installed.
+- The offscreen Qt **integration** suite and the **viewer e2e** now SKIP (rather
+  than fail) when no interpreter provides `PyQt6.QtPdf`.
+
 ## [2.0.0] — 2026-10-12
 
 ### Added

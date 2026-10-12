@@ -119,6 +119,56 @@ class SetKeyCase(unittest.TestCase):
                          b"/FT /Tx /V (x) >>")
 
 
+class IncrementalCase(unittest.TestCase):
+    """incremental_update is pure — these must not need qpdf (CI has none)."""
+    def setUp(self):
+        self.base = fixtures.form_pdf()          # a classic-xref PDF, /Size 13
+
+    def test_extra_defaults_to_empty(self):
+        # extra is optional; `extra or {}` must yield {} for the None default
+        # (the or->and mutant yields None and then `.items()` raises).
+        out = pdffile.incremental_update(self.base, {3: b"<< /Type /Page >>"})
+        self.assertIn(b"startxref", out)
+
+    def test_size_is_kept_from_the_trailer(self):
+        # the trailer's /Size (13) exceeds max(changed)+1, so it must win;
+        # the or->and mutant collapses it to max(changed)+1 == 4. Assert on the
+        # APPENDED trailer only — the base document's own /Size 13 is still in
+        # the bytes, so a whole-output scan would pass on both versions.
+        out = pdffile.incremental_update(self.base, {3: b"<< /Type /Page >>"})
+        appended = out[out.rfind(b"trailer"):]
+        self.assertIn(b"/Size 13", appended)
+        self.assertNotIn(b"/Size 4 ", appended)
+
+
+class NormaliseCase(unittest.TestCase):
+    def test_qpdf_failure_is_reported(self):
+        # Reach the `code != 0` branch with a stubbed run(), so no qpdf is
+        # needed (the ne->eq mutant treats failure as success and returns "").
+        saved_have, saved_run = pdffile.have, pdffile.run
+        pdffile.have = lambda tool: True
+        pdffile.run = lambda cmd: (2, "", "qpdf: boom")
+        self.addCleanup(lambda: (setattr(pdffile, "have", saved_have),
+                                 setattr(pdffile, "run", saved_run)))
+        base, error = pdffile._normalise("ignored.pdf")
+        self.assertIsNone(base)
+        self.assertIn("boom", error)
+
+
+class PageObjectCase(unittest.TestCase):
+    """_page_object bounds — pure, so they hold in CI where the qpdf path skips."""
+    def setUp(self):
+        self.objects = pdffile.parse_objects(fixtures.form_pdf())   # one page
+
+    def test_index_zero_is_the_first_page(self):
+        # le->lt turns `0 <= 0` into `0 < 0`, dropping the first page.
+        self.assertIsNotNone(pdffile._page_object(self.objects, 0))
+
+    def test_index_past_the_end_is_none(self):
+        # lt->le turns `idx < len` into `idx <= len`, indexing past the end.
+        self.assertIsNone(pdffile._page_object(self.objects, 1))
+
+
 @unittest.skipUnless(HAVE_QPDF, "qpdf is required for the authoring path")
 class AuthorCase(unittest.TestCase):
     def setUp(self):

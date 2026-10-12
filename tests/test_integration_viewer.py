@@ -18,13 +18,25 @@ sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "tests"))
 
 import fixtures  # noqa: E402
-from PyQt6.QtWidgets import QApplication  # noqa: E402
 
-from pdf import app as app_mod, theme  # noqa: E402
+# PyQt6 (with the QtPdf module) is required to build the real window. It is a
+# runtime dependency, installed in CI; where it is absent the suite SKIPS rather
+# than failing, so a bare dev box or a stripped runner does not go red on it.
+try:
+    from PyQt6.QtWidgets import QApplication  # noqa: E402
+    from pdf import app as app_mod, theme  # noqa: E402
+    PALETTE = dict(theme.DEFAULT_PALETTE)
+    _QT_IMPORT_ERROR = None
+except ImportError as _exc:  # pragma: no cover - exercised only without PyQt6
+    QApplication = None
+    app_mod = theme = None
+    PALETTE = {}
+    _QT_IMPORT_ERROR = str(_exc)
 
-PALETTE = dict(theme.DEFAULT_PALETTE)
 
-
+@unittest.skipIf(QApplication is None,
+                 "PyQt6 with QtPdf is required for the offscreen integration suite (%s)"
+                 % _QT_IMPORT_ERROR)
 class ViewerCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
