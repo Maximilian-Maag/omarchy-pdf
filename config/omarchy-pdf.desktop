@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Documents (omarchy-pdf)
+GenericName=PDF Viewer
+Comment=Read, annotate and fill PDFs with a vim-style workflow
+Exec=/usr/local/bin/omarchy-pdf %f
+TryExec=/usr/local/bin/omarchy-pdf
+MimeType=application/pdf;application/x-pdf;application/x-bzpdf;application/x-gzpdf;
+Categories=Office;Viewer;Graphics;Qt;
+Terminal=false
+StartupNotify=true
+Keywords=pdf;document;viewer;reader;

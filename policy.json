@@ -34,6 +34,7 @@
     "min_kill_rate": 0.8,
     "source_globs": [
       "bin/*",
+      "pdf/*.py",
       "install.sh"
     ]
   }

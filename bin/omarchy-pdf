@@ -1,0 +1,47 @@
+#!/bin/bash
+# omarchy:summary=Native, keyboard-driven PDF viewer (vim workflow)
+# omarchy:args=[file.pdf] [--command "cmd;cmd"] [--exit]
+# omarchy:examples=omarchy-pdf ~/Vertrag.pdf | omarchy-pdf x.pdf --command "goto 3; zoom-fit-width" --exit
+
+# A thin launcher: it picks an interpreter that actually has PyQt6.QtPdf (the
+# system python does; a mise/pyenv python may not), locates the package, and execs
+# the app. Keeping this logic out of Python means `omarchy-pdf --help` and the
+# interpreter search work even when no Qt is present.
+
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+find_python() {
+  local candidate
+  for candidate in "${OMARCHY_PDF_PYTHON:-}" /usr/bin/python3 python3; do
+    [[ -n $candidate ]] || continue
+    if "$candidate" -c 'import PyQt6.QtPdf' >/dev/null 2>&1; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+PKG_DIR=""
+for candidate in "${OMARCHY_PDF_DIR:-}" "$HERE/.." /usr/local/share/omarchy-pdf \
+                 "${XDG_DATA_HOME:-$HOME/.local/share}/omarchy-pdf"; do
+  if [[ -n $candidate && -d "$candidate/pdf" ]]; then
+    PKG_DIR="$(cd "$candidate" && pwd)"
+    break
+  fi
+done
+
+if [[ -z $PKG_DIR ]]; then
+  echo "omarchy-pdf: cannot find the pdf package (set OMARCHY_PDF_DIR)" >&2
+  exit 2
+fi
+
+PYTHON="$(find_python)" || {
+  echo "omarchy-pdf: no python3 with PyQt6.QtPdf (omarchy pkg add python-pyqt6)" >&2
+  exit 3
+}
+
+export PYTHONPATH="$PKG_DIR${PYTHONPATH:+:$PYTHONPATH}"
+exec "$PYTHON" -m pdf.app "$@"

@@ -29,7 +29,7 @@ install_bin() { # source-name
   echo "  Installed $dest"
 }
 
-for tool in omarchy-toggle-pdf-night omarchy-webapp-qutebrowser omarchy-pdf-sign; do
+for tool in omarchy-pdf omarchy-toggle-pdf-night omarchy-webapp-qutebrowser omarchy-pdf-sign; do
   dest="$BIN_DIR/$tool"
   src="$PLUGIN_DIR/bin/$tool"
   if [[ -L $dest ]] && [[ "$(readlink -f "$dest")" == "$(readlink -f "$src")" ]]; then
@@ -49,13 +49,24 @@ done
 mkdir -p "$APP_DIR"
 cp "$PLUGIN_DIR/config/sign-me-qes.desktop" "$APP_DIR/sign-me-qes.desktop"
 cp "$PLUGIN_DIR/config/chromium.desktop" "$APP_DIR/chromium.desktop"
+cp "$PLUGIN_DIR/config/omarchy-pdf.desktop" "$APP_DIR/omarchy-pdf.desktop"
 command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APP_DIR" >/dev/null 2>&1 || true
 echo "  Installed desktop entries into $APP_DIR"
 
-# ── 4. Papers as the default PDF handler ──────────────────────────────────────
-if command -v xdg-mime >/dev/null 2>&1 && command -v papers >/dev/null 2>&1; then
-  xdg-mime default org.gnome.Papers.desktop application/pdf >/dev/null 2>&1 || true
-  echo "  Default PDF handler -> Papers."
+# ── 3b. The viewer package, under a stable share path the launcher finds ──────
+SHARE_DIR="/usr/local/share/omarchy-pdf"
+if (( EUID == 0 )); then
+  rm -rf "$SHARE_DIR/pdf"; mkdir -p "$SHARE_DIR"; cp -r "$PLUGIN_DIR/pdf" "$SHARE_DIR/pdf"
+  echo "  Installed the pdf package to $SHARE_DIR"
+elif command -v sudo >/dev/null 2>&1; then
+  sudo bash -c "rm -rf '$SHARE_DIR/pdf' && mkdir -p '$SHARE_DIR' && cp -r '$PLUGIN_DIR/pdf' '$SHARE_DIR/pdf'"
+  echo "  Installed the pdf package to $SHARE_DIR"
+fi
+
+# ── 4. Default PDF handler ────────────────────────────────────────────────────
+if command -v xdg-mime >/dev/null 2>&1; then
+  xdg-mime default omarchy-pdf.desktop application/pdf >/dev/null 2>&1 || true
+  echo "  Default PDF handler -> omarchy-pdf."
 fi
 
 # ── 5. Night mode on by default (dark rendering) ──────────────────────────────

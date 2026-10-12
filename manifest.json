@@ -2,17 +2,22 @@
   "schemaVersion": 1,
   "id": "Maximilian-Maag.pdf",
   "name": "PDF",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "author": "Maximilian-Maag",
   "license": "MIT",
-  "description": "A better PDF experience for Omarchy \u2014 Papers as the default viewer with form filling, a Super+Ctrl+N dark/light render toggle (night mode on by default), and QES signing via the D-Trust sign-me portal opened in the default browser.",
+  "description": "A native, keyboard-driven PDF application for Omarchy: a qutebrowser-shaped viewer with a vim workflow (hint mode, :command bar, /search, marks), full ISO 32000 rendering via PDFium, outline/links/selection, dark/light render toggle, and forms/annotate/redact/OCR/sign writing.",
   "kinds": [
     "cli"
   ],
   "activation": "auto",
   "entryPoints": {},
   "omarchy_meta": {
+    "installScript": "install.sh",
     "installPaths": [
+      {
+        "source": "bin/omarchy-pdf",
+        "target": "bin/omarchy-pdf"
+      },
       {
         "source": "bin/omarchy-toggle-pdf-night",
         "target": "bin/omarchy-toggle-pdf-night"
@@ -26,10 +31,19 @@
         "target": "bin/omarchy-pdf-sign"
       }
     ],
+    "features": [
+      "Native Qt/PDFium viewer (vim workflow): hjkl scroll, gg/G, half/full page, zoom, rotate",
+      "qutebrowser-shaped chrome: ':' command bar with completion, '/' incremental search with n/N, f hint mode over links, outline sidebar, status bar",
+      "Spec-complete rendering through PDFium (QtPdf): all filters, fonts, colour, transparency, encryption revisions, page labels/boxes",
+      "Outline, internal/external links, text selection + yank, metadata, password unlocks, printing, embedded attachments, optional-content layers",
+      "Write side: AcroForm fill + save, annotation authoring, real rasterising redaction, tesseract OCR text layer, PKCS#7 verify + QES via sign-me",
+      "Follows the applied Omarchy theme (reads colors.toml); Super+Ctrl+N dark/light render toggle",
+      "Chromium-free web-app shim"
+    ],
     "bindings": [
       {
         "keys": "SUPER + D",
-        "description": "Documents (Papers)"
+        "description": "Documents (omarchy-pdf)"
       },
       {
         "keys": "SUPER + CTRL + N",

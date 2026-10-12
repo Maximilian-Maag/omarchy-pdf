@@ -6,7 +6,7 @@
     "min_kill_rate is the floor: below it the run fails, and a target that yields no",
     "mutants at all fails too, so a mutation pass can never be green over nothing.",
     "per_operator caps how many occurrences of each operator are mutated (determinism",
-    "and runtime); raise it for a deeper nightly run via --max-rate/--only.",
+    "and runtime); raise it for a deeper run via --max-rate/--only.",
     "equivalent lists survivors that were PROVEN unobservable by applying the mutant",
     "and diffing the target's full test output against the baseline (they are excluded",
     "from the denominator, never counted as kills) — each names its (line, kind) and a",
@@ -15,13 +15,16 @@
     "for here or be a target."
   ],
   "min_kill_rate": 0.85,
-  "timeout": 120,
-  "per_operator": 2,
+  "timeout": 180,
+  "per_operator": 3,
   "targets": [
     {
       "path": "bin/omarchy-toggle-pdf-night",
       "lang": "shell",
-      "tests": ["bash", "tests/shell/test_toggle_pdf_night.sh"],
+      "tests": [
+        "bash",
+        "tests/shell/test_toggle_pdf_night.sh"
+      ],
       "equivalent": [
         {
           "line": 20,
@@ -33,7 +36,10 @@
     {
       "path": "bin/omarchy-webapp-qutebrowser",
       "lang": "shell",
-      "tests": ["bash", "tests/shell/test_webapp_qutebrowser.sh"],
+      "tests": [
+        "bash",
+        "tests/shell/test_webapp_qutebrowser.sh"
+      ],
       "equivalent": [
         {
           "line": 22,
@@ -45,12 +51,97 @@
     {
       "path": "bin/omarchy-pdf-sign",
       "lang": "shell",
-      "tests": ["bash", "tests/shell/test_pdf_sign.sh"],
+      "tests": [
+        "bash",
+        "tests/shell/test_pdf_sign.sh"
+      ],
       "equivalent": [
         {
           "line": 16,
           "kind": "number±1",
           "reason": "notify()'s guard redirects to /dev/null; 2>&1 -> 3>&1 opens an unused fd3 and 2>&1 -> 2>&2 is a self-duplication no-op, both discarding the same empty `command -v` output — proven identical by diffing the full test output"
+        }
+      ]
+    },
+    {
+      "path": "pdf/keymap.py",
+      "lang": "python",
+      "tests": [
+        "python3",
+        "tests/test_unit_keymap.py"
+      ],
+      "equivalent": [
+        {
+          "line": 52,
+          "kind": "plus->minus",
+          "reason": "inside `i = max(close + 1, i + 1)`: on this branch close >= i, so close+1 > i-1 and max() always returns close+1 — the i+1 -> i-1 change is unobservable, proven by diffing the full test output (identical rc and output)"
+        }
+      ]
+    },
+    {
+      "path": "pdf/nav.py",
+      "lang": "python",
+      "tests": [
+        "python3",
+        "tests/test_unit_nav.py"
+      ]
+    },
+    {
+      "path": "pdf/hints.py",
+      "lang": "python",
+      "tests": [
+        "python3",
+        "tests/test_unit_hints.py"
+      ]
+    },
+    {
+      "path": "pdf/theme.py",
+      "lang": "python",
+      "tests": [
+        "python3",
+        "tests/test_unit_theme.py"
+      ]
+    },
+    {
+      "path": "pdf/commands.py",
+      "lang": "python",
+      "tests": [
+        "python3",
+        "tests/test_unit_commands.py"
+      ]
+    },
+    {
+      "path": "pdf/pdffile.py",
+      "lang": "python",
+      "tests": [
+        "python3",
+        "tests/test_unit_pdffile.py"
+      ],
+      "equivalent": [
+        {
+          "line": 32,
+          "kind": "number±1",
+          "reason": "subprocess timeout=120 vs 121s: no test (nor the suite) ever lets a command approach the timeout, so the value is unobservable — proven by applying the mutant and diffing the full test output (identical rc and output)"
+        }
+      ]
+    },
+    {
+      "path": "pdf/docops.py",
+      "lang": "python",
+      "tests": [
+        "python3",
+        "tests/test_unit_docops.py"
+      ],
+      "equivalent": [
+        {
+          "line": 18,
+          "kind": "number±1",
+          "reason": "subprocess timeout=120 vs 121s: unobservable, no stubbed or real command approaches the timeout — proven by diffing the full test output (identical)"
+        },
+        {
+          "line": 20,
+          "kind": "number±1",
+          "reason": "the error returncode sentinel 1 vs 2: every caller branches on `code != 0` / `code == 0`, so any non-zero value is indistinguishable — proven by diffing the full test output (identical)"
         }
       ]
     }
@@ -59,6 +150,34 @@
     {
       "path": "install.sh",
       "reason": "privileged installer (sudo/pkexec, /usr/local/bin); mutating it meaningfully needs a root harness, wiring is verified by review"
+    },
+    {
+      "path": "pdf/__init__.py",
+      "reason": "package marker holding only the version string; no behaviour to mutate"
+    },
+    {
+      "path": "bin/omarchy-pdf",
+      "reason": "launcher: interpreter/package discovery only; its argv assembly is verified by the shell test and the full app is booted by the e2e"
+    },
+    {
+      "path": "pdf/view.py",
+      "reason": "Qt render surface (QGraphicsView + QtPdf). The interaction logic lives in the pure modules; this glue is covered by the offscreen integration and e2e suites rather than mutated"
+    },
+    {
+      "path": "pdf/app.py",
+      "reason": "QMainWindow wiring; exercised by the offscreen integration + e2e boot rather than mutated"
+    },
+    {
+      "path": "pdf/statusbar.py",
+      "reason": "QLabel text glue; verified by the offscreen integration suite"
+    },
+    {
+      "path": "pdf/commandbar.py",
+      "reason": "QLineEdit prompt widget; its accept/cancel path is driven by the offscreen integration suite"
+    },
+    {
+      "path": "pdf/writeops.py",
+      "reason": "thin wrappers over CLI tools (pdftoppm/tesseract/qpdf/gs/pdfsig); the authoring logic is in pdf/pdffile.py (mutated), the tool argv is fixed and reviewed"
     },
     {
       "path": "tools/policy_check.py",

@@ -37,7 +37,18 @@ fi
 
 if want integration; then
   if ls tests/test_integration_*.py >/dev/null 2>&1; then
-    run "integration tests (python)" python3 -m unittest discover -s tests -p 'test_integration_*.py' -q
+    # The Qt integration suite needs an interpreter that has PyQt6 (the system
+    # python does; a mise/pyenv python usually does not), so pick one explicitly.
+    qt_python() {
+      local candidate
+      for candidate in "${PDF_PYTHON:-}" /usr/bin/python3 python3; do
+        [[ -n $candidate ]] || continue
+        "$candidate" -c 'import PyQt6.QtPdf' >/dev/null 2>&1 && { printf '%s\n' "$candidate"; return; }
+      done
+      printf 'python3\n'
+    }
+    QTPY="$(qt_python)"
+    run "integration tests (python/qt)" env QT_QPA_PLATFORM=offscreen "$QTPY" -m unittest discover -s tests -p 'test_integration_*.py' -q
   else
     printf '\n=== integration tests ===\nnot applicable to this plugin (no integration surface)\n'
   fi
