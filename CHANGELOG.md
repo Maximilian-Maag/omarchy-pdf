@@ -17,6 +17,9 @@ All notable changes to omarchy-pdf are documented here.
   being installed.
 - The offscreen Qt **integration** suite and the **viewer e2e** now SKIP (rather
   than fail) when no interpreter provides `PyQt6.QtPdf`.
+- The viewer e2e's render check accepts any number of rendered pages (`>= 1`)
+  instead of exactly one — the offscreen viewport renders a different page count
+  on the runner than on the dev box.
 
 ## [2.0.0] — 2026-10-12
 

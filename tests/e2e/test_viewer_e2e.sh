@@ -92,8 +92,13 @@ rendered = [i for i in w._pages.values() if not i.pixmap().isNull()]
 print("RENDERED", len(rendered))
 PY
 )"
-if [[ $render_out == *"RENDERED 1"* ]]; then
-  ok "PDFium rendered page pixels offscreen"
+if [[ $render_out == *"RENDERED"* ]]; then
+  rendered_n="$(printf '%s\n' "$render_out" | sed -n 's/^RENDERED \([0-9][0-9]*\)$/\1/p' | tail -1)"
+  if [[ -n $rendered_n ]] && (( rendered_n >= 1 )); then
+    ok "PDFium rendered page pixels offscreen ($rendered_n page(s))"
+  else
+    no "render produced no pixmap: $render_out"
+  fi
 else
   no "render produced no pixmap: $render_out"
 fi
