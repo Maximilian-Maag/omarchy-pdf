@@ -80,7 +80,7 @@ if [[ -f $BINDINGS ]] && ! grep -q 'omarchy-toggle-pdf-night' "$BINDINGS"; then
   cat >> "$BINDINGS" << 'LUA'
 
 -- omarchy-pdf plugin
-o.bind("SUPER + D",         "Documents (Papers)",       "papers")
+o.bind("SUPER + D",         "Documents (omarchy-pdf)",   "/usr/local/bin/omarchy-pdf")
 o.bind("SUPER + CTRL + N",  "PDF dark/light toggle",    "/usr/local/bin/omarchy-toggle-pdf-night")
 o.bind("SUPER + SHIFT + Q", "sign-me (QES signieren)",  { launch = "qutebrowser --target window https://www.sign-me.de/" })
 LUA
@@ -102,7 +102,7 @@ echo ""
 echo "Done!"
 echo ""
 echo "Keybindings:"
-echo "  Super + D          — open a document in Papers"
+echo "  Super + D          — open a document in omarchy-pdf"
 echo "  Super + Ctrl + N   — toggle PDF dark/light rendering"
 echo "  Super + Shift + Q  — open the sign-me portal (QES)"
 echo ""
