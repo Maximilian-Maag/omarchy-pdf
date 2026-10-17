@@ -2,6 +2,19 @@
 
 All notable changes to omarchy-pdf are documented here.
 
+## [2.0.3] — 2026-10-17
+
+### Fixed
+- **`:layers` (the `l` key) was a silent no-op — it always answered "no optional-content
+  layers".** `qpdf >= 11` defaults `--json` to version 2, a format with **no object table**,
+  so the OCG scan had nothing to read. The unit tests passed because their fake runner
+  returned the pre-11 shape (`qpdf[*].objects`) that a real qpdf no longer emits — the tests
+  had pinned the bug. `layers()` now requests the object table explicitly
+  (`--json=1 --json-key=objects`) and accepts both the top-level and nested shapes, with a
+  fallback for a qpdf too old to know the flag. Found by opening a real document that carries
+  an OCG. Guarded by a **real-qpdf** test over a new `layer_pdf` fixture (plus the
+  top-level / nested / fallback / bad-json cases).
+
 ## [2.0.2] — 2026-10-17
 
 ### Fixed

@@ -97,20 +97,40 @@ def _ocg_names(objects: dict) -> list[str]:
     return names
 
 
+def _object_maps(data: dict) -> dict:
+    """Collect qpdf's object table from its JSON, in either shape it has shipped.
+
+    `--json=1 --json-key=objects` (qpdf >= 11 with `--json=1`) puts it at the TOP level;
+    older qpdf nested it under `qpdf[*].objects`. Reading only the nested shape is what
+    made `layers()` a silent no-op on qpdf 12 (which defaults `--json` to version 2, a
+    format that carries no object table at all).
+    """
+    objects: dict = {}
+    top = data.get("objects")
+    if isinstance(top, dict):
+        objects.update(top)
+    for section in data.get("qpdf", []):
+        if isinstance(section, dict) and isinstance(section.get("objects"), dict):
+            objects.update(section["objects"])
+    return objects
+
+
 def layers(path: str) -> str:
     """List optional-content groups (layers) via qpdf's JSON view."""
     if not have("qpdf"):
         return "qpdf is not installed (omarchy pkg add qpdf)"
-    code, out, err = run(["qpdf", "--json", path])
+    # qpdf >= 11 defaults `--json` to version 2, which has NO object table, so the object
+    # table must be requested explicitly or every document reports "no layers" even when
+    # it has one. Measured on qpdf 12.4.1 against a document carrying an OCG.
+    code, out, err = run(["qpdf", "--json=1", "--json-key=objects", path])
     if code != 0:
-        return f"qpdf failed: {err.strip()[:160]}"
+        # very old qpdf emitted v1-with-objects for a bare `--json`
+        code, out, err = run(["qpdf", "--json", path])
+        if code != 0:
+            return f"qpdf failed: {err.strip()[:160]}"
     try:
         data = json.loads(out)
     except ValueError:
         return "could not read the document structure"
-    objects = {}
-    for section in data.get("qpdf", []):
-        if isinstance(section, dict) and "objects" in section:
-            objects.update(section["objects"])
-    names = _ocg_names(objects)
+    names = _ocg_names(_object_maps(data))
     return "\n".join(names) if names else "no optional-content layers"

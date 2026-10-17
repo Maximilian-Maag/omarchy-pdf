@@ -74,6 +74,19 @@ def form_pdf() -> bytes:
     })
 
 
+def layer_pdf() -> bytes:
+    """One page plus one optional-content group (a layer named 'Watermark')."""
+    return build({
+        1: (b"<< /Type /Catalog /Pages 2 0 R "
+            b"/OCProperties << /OCGs [6 0 R] /D << /ON [6 0 R] >> >> >>"),
+        2: b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        3: _page(2, 4),
+        4: _stream(b"Layer page"),
+        6: b"<< /Type /OCG /Name (Watermark) >>",
+        9: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    })
+
+
 def write(path: str | pathlib.Path, data: bytes) -> str:
     pathlib.Path(path).write_bytes(data)
     return str(path)
