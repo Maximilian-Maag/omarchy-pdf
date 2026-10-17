@@ -1,4 +1,5 @@
 """Unit tests: pdf/keymap — sequence parsing and the prefix-aware resolver."""
+import ast
 import pathlib
 import sys
 import unittest
@@ -117,6 +118,42 @@ class BindTableCase(unittest.TestCase):
                 with self.subTest(mode=mode, seq=seq, command=name):
                     self.assertIsNotNone(commands.lookup(name),
                                          f"{mode}/{seq} -> unknown command {name!r}")
+
+    def test_l_scrolls_right_and_does_not_list_layers(self):
+        """`l` was in the normal dict TWICE — scroll-right, then layers. The later key
+        won, so the vim motion was dead and nothing said so."""
+        self.assertEqual(self.km.command_for("normal", "l"), "scroll-right")
+
+    def test_layers_is_still_reachable(self):
+        self.assertEqual(self.km.command_for("normal", "<C-l>"), "layers")
+
+    def test_no_key_is_bound_twice_within_a_mode(self):
+        """A duplicate key in the dict literal is invisible after import (the literal
+        collapses to the last one), so this checks the SOURCE, which is the only place a
+        shadowed binding can be seen."""
+        tree = ast.parse((REPO / "pdf" / "keymap.py").read_text())
+        table = None
+        for node in ast.walk(tree):
+            # DEFAULT_BINDS carries a type annotation, so it is an AnnAssign, not an Assign
+            if isinstance(node, ast.AnnAssign) and isinstance(node.value, ast.Dict):
+                target = node.target
+            elif isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict):
+                target = node.targets[0]
+            else:
+                continue
+            if isinstance(target, ast.Name) and target.id == "DEFAULT_BINDS":
+                table = node.value
+                break
+        self.assertIsNotNone(table, "DEFAULT_BINDS moved; this guard needs updating")
+        assert table is not None
+        for mode_node, value_node in zip(table.keys, table.values):
+            if not isinstance(value_node, ast.Dict) or mode_node is None:
+                continue
+            mode = ast.literal_eval(mode_node)
+            keys = [ast.literal_eval(k) for k in value_node.keys if k is not None]
+            duplicates = sorted({k for k in keys if keys.count(k) > 1})
+            self.assertEqual(duplicates, [],
+                             f"duplicate bindings in mode {mode!r}: {duplicates}")
 
 
 if __name__ == "__main__":

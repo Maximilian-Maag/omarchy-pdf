@@ -29,7 +29,7 @@ the way qutebrowser owns its interaction over QtWebEngine.
 | `t` `b` | toggle the outline sidebar |
 | `y` `Y` | yank the selection / the page text |
 | `m` `'` | set / jump to a mark |
-| `i` `s` `p` `a` `l` | info, save-as, print, attachments, layers |
+| `i` `s` `p` `a` `<Ctrl-l>` | info, save-as, print, attachments, layers |
 | `e` `A` `x` `C` `S` | forms, annotate, redact, OCR, sign/verify |
 | `:` | command line (with tab-completion) |
 | `q` | quit |

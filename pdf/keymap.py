@@ -125,7 +125,10 @@ DEFAULT_BINDS: dict[str, dict[str, str]] = {
         "s": "save-as",
         "p": "print",
         "a": "attachments",
-        "l": "layers",
+        # NOT "l": vim's `l` is scroll-right, and it was already bound above — a second
+        # "l" in this same dict silently WON (later key), so the vim motion was dead and
+        # the doc-op was the only thing `l` did. Layers moved to <C-l> instead.
+        "<C-l>": "layers",
         # write-side operations
         "e": "forms",
         "A": "annotate",

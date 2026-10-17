@@ -2,6 +2,18 @@
 
 All notable changes to omarchy-pdf are documented here.
 
+## [2.0.4] — 2026-10-17
+
+### Fixed
+- **`l` did not scroll right — it listed layers, and the vim motion was dead.** `l` was in
+  the normal-mode bind table **twice** (`scroll-right`, then `layers`); in a dict literal the
+  later key wins silently, so `l` listed optional-content groups and `scroll-right` could
+  never fire. Layers moved to **`<Ctrl-l>`**, and `l` is scroll-right again.
+- Guarded by a test that reads the bind table's **source** (a duplicate is invisible after
+  import, because the literal collapses): it fails with
+  `duplicate bindings in mode 'normal': ['l']` if the collision returns — proven by
+  reintroducing it. Plus `l`/`<Ctrl-l>` resolution tests, and the docs updated.
+
 ## [2.0.3] — 2026-10-17
 
 ### Fixed
