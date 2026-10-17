@@ -2,6 +2,16 @@
 
 All notable changes to omarchy-pdf are documented here.
 
+## [2.0.5] — 2026-10-17
+
+### Fixed
+- **The Qt-driving tests depended on the caller's environment for their platform.** They set
+  `QT_QPA_PLATFORM` with `setdefault`, and the desktop session exports
+  `QT_QPA_PLATFORM=wayland;xcb`, so the intended offscreen platform never applied — the tests
+  then ran against a real display (and could take the user's focus). Both `test_integration_viewer.py`
+  and `test_viewer_e2e.sh` now assign it outright. Found while chasing the same bug in
+  omarchy-qutebrowser's JS harness, where it produced a different set of failures every run.
+
 ## [2.0.4] — 2026-10-17
 
 ### Fixed

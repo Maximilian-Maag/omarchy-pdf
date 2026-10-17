@@ -11,7 +11,9 @@ import tempfile
 import time
 import unittest
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# Force offscreen: this drives real Qt, and inheriting the session's QT_QPA_PLATFORM makes
+# the run depend on the desktop session (that is exactly what made the JS harness flaky).
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))

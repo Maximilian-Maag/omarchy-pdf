@@ -78,7 +78,9 @@ fi
 # 4. The engine really renders pixels (offscreen), through the real view.
 render_out="$("$PY" - "$PDF" "$REPO" <<'PY' 2>&1
 import os, sys
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# Force offscreen: this drives real Qt, and inheriting the session's QT_QPA_PLATFORM makes
+# the run depend on the desktop session (that is exactly what made the JS harness flaky).
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
 sys.path.insert(0, sys.argv[2]); sys.path.insert(0, sys.argv[2] + "/tests")
 from PyQt6.QtWidgets import QApplication
 from pdf import view as V, theme
