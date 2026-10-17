@@ -13,7 +13,7 @@ import os
 import subprocess
 
 from PyQt6.QtCore import Qt, QSize, QRectF, QPointF, QTimer, QModelIndex, pyqtSignal
-from PyQt6.QtGui import QPixmap, QPainter, QColor, QPen, QBrush, QFont, QPolygonF
+from PyQt6.QtGui import (QPixmap, QImage, QPainter, QColor, QPen, QBrush, QFont, QPolygonF)
 from PyQt6.QtWidgets import (QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
                              QGraphicsRectItem, QGraphicsSimpleTextItem, QApplication)
 from PyQt6.QtPdf import (QPdfDocument, QPdfSearchModel, QPdfLinkModel,
@@ -182,13 +182,30 @@ class PdfView(QGraphicsView):
                                                   max(1, int(rect.height()))))
             if qimage.isNull():
                 continue
-            item = QGraphicsPixmapItem(QPixmap.fromImage(qimage))
+            item = QGraphicsPixmapItem(self._page_pixmap(qimage))
             item.setPos(rect.topLeft())
             if self._rotation:
                 item.setTransformOriginPoint(rect.width() / 2, rect.height() / 2)
                 item.setRotation(self._rotation)
             self._scene.addItem(item)
             self._pages[index] = item
+
+    def _page_pixmap(self, image):
+        """Composite a QtPdf page render onto opaque paper.
+
+        QtPdf (PDFium) returns a page with a TRANSPARENT background: a PDF usually does
+        not paint the white sheet, it only draws content over it. Shown as-is, that
+        transparent area reveals the scene background, which is the dark theme colour -
+        so a page of black text ends up black-on-black and is unreadable. Fill the sheet
+        first, the way every other PDF viewer does. The colour is the palette's `paper`
+        (white unless a theme overrides it).
+        """
+        paper = QImage(image.size(), QImage.Format.Format_RGB32)
+        paper.fill(QColor(self.palette_dict.get("paper", "#ffffff")))
+        painter = QPainter(paper)
+        painter.drawImage(0, 0, image)
+        painter.end()
+        return QPixmap.fromImage(paper)
 
     def _on_scroll(self, _value):
         self._render_visible()

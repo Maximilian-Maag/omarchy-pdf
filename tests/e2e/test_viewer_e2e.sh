@@ -90,6 +90,9 @@ app.processEvents()
 w._render_visible()
 rendered = [i for i in w._pages.values() if not i.pixmap().isNull()]
 print("RENDERED", len(rendered))
+if rendered:
+    c = rendered[0].pixmap().toImage().pixelColor(2, 2)
+    print("PAPER", c.alpha(), c.red(), c.green(), c.blue())
 PY
 )"
 if [[ $render_out == *"RENDERED"* ]]; then
@@ -101,6 +104,16 @@ if [[ $render_out == *"RENDERED"* ]]; then
   fi
 else
   no "render produced no pixmap: $render_out"
+fi
+
+# 5. Pages are composited onto OPAQUE, LIGHT paper. QtPdf renders a page with a
+#    transparent background; without compositing, a dark theme shows through and a page
+#    of black text renders black-on-black (measured: unreadable on the real desktop).
+paper="$(printf '%s\n' "$render_out" | sed -n 's/^PAPER //p' | tail -1)"
+if [[ $paper == "255 "* ]]; then
+  ok "page is composited on opaque paper (PAPER $paper)"
+else
+  no "page background is not opaque paper (PAPER ${paper:-<none>}) - black text can be invisible on a dark theme"
 fi
 
 echo "e2e: $pass passed, $fail failed"

@@ -37,6 +37,13 @@ QtPdf gives us, out of the box, and we use all of it:
 | `QPdfBookmarkModel` | the document outline / bookmarks tree |
 | `QPdfPageNavigator` | page navigation history |
 
+One thing QtPdf does **not** do for us: `QPdfDocument::render()` returns the page with a
+**transparent** background — a PDF normally draws only content and never the white sheet.
+The view therefore composites every page onto an opaque `paper` colour (`PdfView._page_pixmap`)
+before displaying it. Without that the scene background shows through, and on a dark theme a
+page of black text is rendered black-on-black. Enforced by
+`tests/test_integration_viewer.py::test_page_composited_on_paper` and the viewer e2e's paper check.
+
 ## 2. What PDFium does *not* expose, and how we cover it
 
 QtPdf is a **viewer** engine. Authoring (fill, annotate, sign, redact) is not in its

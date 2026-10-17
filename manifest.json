@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "Maximilian-Maag.pdf",
   "name": "PDF",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "author": "Maximilian-Maag",
   "license": "MIT",
   "description": "A native, keyboard-driven PDF application for Omarchy: a qutebrowser-shaped viewer with a vim workflow (hint mode, :command bar, /search, marks), full ISO 32000 rendering via PDFium, outline/links/selection, dark/light render toggle, and forms/annotate/redact/OCR/sign writing.",

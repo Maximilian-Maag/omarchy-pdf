@@ -63,6 +63,21 @@ class ViewerCase(unittest.TestCase):
         self.assertEqual(self.view.page_count(), 3)
         self.assertEqual(self.view.current_page(), 0)
 
+    def test_page_composited_on_paper(self):
+        # QtPdf renders a page with a TRANSPARENT background (most PDFs never paint the
+        # white sheet). The view must composite it onto opaque paper before showing it:
+        # otherwise the page shows the scene background, which on a dark theme is
+        # near-black, and a page of black text is rendered black-on-black.
+        self.view.resize(900, 1200)
+        self.view.goto_page(0)
+        self.view._render_visible()
+        item = self.view._pages.get(0)
+        self.assertIsNotNone(item, "page 0 should have rendered")
+        pixel = item.pixmap().toImage().pixelColor(2, 2)
+        self.assertEqual(pixel.alpha(), 255, "page background must be opaque")
+        self.assertGreater(min(pixel.red(), pixel.green(), pixel.blue()), 200,
+                           "page paper must be light, not the dark scene background")
+
     # ── navigation via the keymap ─────────────────────────────────────────
     def test_keymap_goto_last(self):
         self.view.send_keys("G")

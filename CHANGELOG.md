@@ -2,6 +2,20 @@
 
 All notable changes to omarchy-pdf are documented here.
 
+## [2.0.2] — 2026-10-17
+
+### Fixed
+- **Pages rendered black-on-black on a dark theme.** `QPdfDocument::render()` returns a
+  page with a **transparent** background (a PDF draws only its content and never paints
+  the white sheet), so that transparent area revealed the scene background — the dark
+  theme colour — and a page of black text was rendered black-on-black, illegible.
+  Measured on the real desktop with `Ghostscript.pdf`: page 1 came out black, and the
+  render differed from poppler (`pdftoppm`) by **RMSE 0.965**. The view now composites
+  every page onto opaque `paper` (`PdfView._page_pixmap`) before displaying it; the same
+  page now matches poppler to **RMSE 0.039**. Guarded by
+  `tests/test_integration_viewer.py::test_page_composited_on_paper` and the viewer e2e's
+  paper check — both fail on the transparent render.
+
 ## [2.0.1] — 2026-10-12
 
 ### Fixed
