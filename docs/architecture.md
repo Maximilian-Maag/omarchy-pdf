@@ -44,6 +44,30 @@ before displaying it. Without that the scene background shows through, and on a 
 page of black text is rendered black-on-black. Enforced by
 `tests/test_integration_viewer.py::test_page_composited_on_paper` and the viewer e2e's paper check.
 
+### The one ABI assumption, and how it is kept
+
+PyQt6's QtPdf module is generated against the Qt it was **built** against but links the
+`libQt6Pdf.so.6` present at runtime, so the two can disagree. Arch shipped `python-pyqt6
+6.11.0-4` built against Qt 6.12 — and without declaring a dependency on the Qt package whose
+library it needs — onto systems whose `libQt6Pdf` was still 6.11. The bindings then ask for
+the Qt 6.12 overload `QPdfDocument::render(page, size, options, QImage::Format, QColor)`, the
+import fails on that undefined symbol, and *every* render path is dead while `pacman` reports
+a consistent system. Nothing in the plugin can see that coming from a version string.
+
+`shim/qtpdf-compat.cpp` supplies that single symbol, forwarding to the 4-arg overload both Qt
+6.11 and 6.12 export, so it stays correct after the system catches up. The decision to load it
+is one script: `bin/omarchy-pdf-qtpdf-compat` prints the library only when the interpreter's
+`import PyQt6.QtPdf` fails **on that symbol** *and* preloading the shim makes the very same
+interpreter import successfully — an unrecognised ABI gap therefore reports nothing rather
+than a bogus fix. The launcher, `tools/run_tests.sh` and `install.sh` all go through that one
+decision, so on a coherent system nothing is ever preloaded, and the shim is never loaded.
+
+Enforced by `tests/shell/test_qtpdf_compat.sh` (the decision, plus that the built artifact
+really exports the overload under the `Qt_6` version tag) and
+`tests/test_integration_qtpdf_binding.py` (a PyQt6 that is installed but cannot import QtPdf
+FAILS the suite instead of letting the Qt tests skip it — the silent green that hid exactly
+this breakage).
+
 ## 2. What PDFium does *not* expose, and how we cover it
 
 QtPdf is a **viewer** engine. Authoring (fill, annotate, sign, redact) is not in its
@@ -83,13 +107,18 @@ pdf/                     importable package (installed under share/omarchy-pdf)
   commandbar.py        ':' command line with completion
   app.py               QMainWindow wiring + entry point
 bin/omarchy-pdf          launcher (picks an interpreter that has PyQt6.QtPdf)
+bin/omarchy-pdf-qtpdf-compat  decides when the QtPdf ABI compat shim is preloaded
 bin/omarchy-toggle-pdf-night, bin/omarchy-pdf-sign, bin/omarchy-webapp-qutebrowser
+shim/qtpdf-compat.cpp    the one QtPdf symbol a newer PyQt6 needs and an older Qt lacks
+tools/build-qtpdf-compat.sh   builds it (C++ compiler + QtPdf headers)
 ```
 
 PURE modules import **no Qt** and no third-party package: they are unit-tested directly
 and are the mutation targets. The Qt-adjacent modules (`view`, `app`, `statusbar`,
 `commandbar`, `hintoverlay`) are exercised by the **offscreen** integration/e2e suites
-(`QT_QPA_PLATFORM=offscreen`) and are mutation-`exempt` with a stated reason.
+(`QT_QPA_PLATFORM=offscreen`) and are mutation-`exempt` with a stated reason. The QtPdf
+compat helper is a mutation target too — it is the one piece of shell logic whose wrong
+answer silently costs you the viewer (see §1).
 
 ## 4. The View protocol
 
@@ -154,7 +183,8 @@ Every kind the repo promises, in `tools/run_tests.sh`:
 - **regression** (`tests/test_regression_*.py`) — the v1 commands (night toggle, sign,
   webapp shim) still behave.
 - **integration** — offscreen Qt: build the real window against a throwaway config,
-  drive it with synthesized keys, assert document state.
+  drive it with synthesized keys, assert document state; plus the guard that a PyQt6
+  which is installed but cannot import QtPdf fails here instead of skipping.
 - **e2e** (`tests/e2e/*.sh`) — boot the real app heads-down, render a fixture PDF,
   quit; plus the v1 wiring chains.
 - **mutation** (`tools/mutator.py`, `tests/mutation.json`) — floor 0.85 over the PURE

@@ -7,17 +7,34 @@
 # system python does; a mise/pyenv python may not), locates the package, and execs
 # the app. Keeping this logic out of Python means `omarchy-pdf --help` and the
 # interpreter search work even when no Qt is present.
+#
+# A PyQt6 whose QtPdf bindings were generated against a newer Qt than the installed
+# libQt6Pdf still exports cannot even import; omarchy-pdf-qtpdf-compat answers
+# whether the compat shim closes exactly that gap for a given interpreter, and only
+# then is it preloaded (see shim/qtpdf-compat.cpp).
 
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+COMPAT="$HERE/omarchy-pdf-qtpdf-compat"
 
+# Sets PYTHON (the interpreter) and PRELOAD (a QtPdf compat library, or empty).
+# Not a command substitution: an export inside it would land in a subshell.
 find_python() {
-  local candidate
+  local candidate lib
   for candidate in "${OMARCHY_PDF_PYTHON:-}" /usr/bin/python3 python3; do
     [[ -n $candidate ]] || continue
     if "$candidate" -c 'import PyQt6.QtPdf' >/dev/null 2>&1; then
-      printf '%s\n' "$candidate"
+      PYTHON="$candidate"
+      return 0
+    fi
+    lib=""
+    if [[ -x $COMPAT ]]; then
+      lib="$("$COMPAT" preload "$candidate" 2>/dev/null)" || lib=""
+    fi
+    if [[ -n $lib ]]; then
+      PYTHON="$candidate"
+      PRELOAD="$lib"
       return 0
     fi
   done
@@ -38,10 +55,16 @@ if [[ -z $PKG_DIR ]]; then
   exit 2
 fi
 
-PYTHON="$(find_python)" || {
+PYTHON=""
+PRELOAD=""
+if ! find_python; then
   echo "omarchy-pdf: no python3 with PyQt6.QtPdf (omarchy pkg add python-pyqt6)" >&2
   exit 3
-}
+fi
+
+if [[ -n $PRELOAD ]]; then
+  export LD_PRELOAD="${PRELOAD}${LD_PRELOAD:+:$LD_PRELOAD}"
+fi
 
 export PYTHONPATH="$PKG_DIR${PYTHONPATH:+:$PYTHONPATH}"
 exec "$PYTHON" -m pdf.app "$@"

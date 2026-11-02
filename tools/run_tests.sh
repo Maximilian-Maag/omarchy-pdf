@@ -39,15 +39,36 @@ if want integration; then
   if ls tests/test_integration_*.py >/dev/null 2>&1; then
     # The Qt integration suite needs an interpreter that has PyQt6 (the system
     # python does; a mise/pyenv python usually does not), so pick one explicitly.
+    # Where the bindings were built against a newer QtPdf than the installed library
+    # exports, the compat shim is preloaded (`import PyQt6.QtPdf` fails otherwise):
+    # that keeps these tests RUNNING instead of silently skipping, which is how a
+    # dead plugin used to look green.
     qt_python() {
-      local candidate
+      local candidate lib
       for candidate in "${PDF_PYTHON:-}" /usr/bin/python3 python3; do
         [[ -n $candidate ]] || continue
-        "$candidate" -c 'import PyQt6.QtPdf' >/dev/null 2>&1 && { printf '%s\n' "$candidate"; return; }
+        if "$candidate" -c 'import PyQt6.QtPdf' >/dev/null 2>&1; then
+          QTPY="$candidate"
+          return 0
+        fi
+        lib=""
+        if [[ -x bin/omarchy-pdf-qtpdf-compat ]]; then
+          lib="$(bin/omarchy-pdf-qtpdf-compat preload "$candidate" 2>/dev/null)" || lib=""
+        fi
+        if [[ -n $lib ]]; then
+          QTPY="$candidate"
+          LD_PRELOAD="${lib}${LD_PRELOAD:+:$LD_PRELOAD}"
+          export LD_PRELOAD
+          return 0
+        fi
       done
-      printf 'python3\n'
+      return 1
     }
-    QTPY="$(qt_python)"
+    QTPY=""
+    if ! qt_python; then
+      printf '\n=== integration tests ===\nno interpreter with PyQt6.QtPdf — falling back to python3, which skips them\n'
+      QTPY="python3"
+    fi
     run "integration tests (python/qt)" env QT_QPA_PLATFORM=offscreen "$QTPY" -m unittest discover -s tests -p 'test_integration_*.py' -q
   else
     printf '\n=== integration tests ===\nnot applicable to this plugin (no integration surface)\n'

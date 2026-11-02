@@ -64,6 +64,7 @@ search <text> / goto <page|label> / zoom-set <pct> / rotate-cw ...
 | `omarchy-toggle-pdf-night [on\|off\|toggle\|--status]` | Papers' dark/light render toggle (`Super+Ctrl+N`) |
 | `omarchy-pdf-sign [pdf]` | open the D-Trust **sign-me** portal to sign with a QES (eIDAS) |
 | `omarchy-webapp-qutebrowser --app=<url>` | Chromium-free web-app fallback |
+| `omarchy-pdf-qtpdf-compat preload <python>` | print the QtPdf compat library to preload, or nothing (used by the launcher) |
 
 ## Install
 
@@ -79,6 +80,15 @@ default `application/pdf` handler.
 **Requirements:** `python-pyqt6` (system python — the viewer is Qt), `qpdf`,
 `poppler` (`pdfinfo`/`pdfsig`/`pdfdetach`/`pdftoppm`/`pdftocairo`/`pdfunite`),
 `ghostscript`, `tesseract`, `cups`. Papers is optional.
+
+**QtPdf ABI note.** A PyQt6 whose QtPdf bindings were built against a *newer* Qt than the
+`libQt6Pdf` a system still ships cannot import `PyQt6.QtPdf` at all (`undefined symbol:
+QPdfDocument::render…`), which kills the viewer while `pacman` sees a consistent system —
+its `python-pyqt6` declares no dependency on the Qt package whose library it needs.
+`install.sh` therefore builds `shim/qtpdf-compat.cpp` (a C++ compiler and the QtPdf headers
+are needed) and `bin/omarchy-pdf-qtpdf-compat` preloads it *only* while that exact gap
+exists: on a coherent system nothing is preloaded. If the launcher reports no interpreter
+with `PyQt6.QtPdf`, run `tools/build-qtpdf-compat.sh` and re-run `./install.sh`.
 
 ## Architecture
 

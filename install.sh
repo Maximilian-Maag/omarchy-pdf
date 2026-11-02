@@ -29,7 +29,7 @@ install_bin() { # source-name
   echo "  Installed $dest"
 }
 
-for tool in omarchy-pdf omarchy-toggle-pdf-night omarchy-webapp-qutebrowser omarchy-pdf-sign; do
+for tool in omarchy-pdf omarchy-pdf-qtpdf-compat omarchy-toggle-pdf-night omarchy-webapp-qutebrowser omarchy-pdf-sign; do
   dest="$BIN_DIR/$tool"
   src="$PLUGIN_DIR/bin/$tool"
   if [[ -L $dest ]] && [[ "$(readlink -f "$dest")" == "$(readlink -f "$src")" ]]; then
@@ -61,6 +61,36 @@ if (( EUID == 0 )); then
 elif command -v sudo >/dev/null 2>&1; then
   sudo bash -c "rm -rf '$SHARE_DIR/pdf' && mkdir -p '$SHARE_DIR' && cp -r '$PLUGIN_DIR/pdf' '$SHARE_DIR/pdf'"
   echo "  Installed the pdf package to $SHARE_DIR"
+fi
+
+# ── 3c. QtPdf ABI compat shim ─────────────────────────────────────────────────
+# PyQt6's QtPdf module is generated against the Qt it was BUILT against but links the
+# libQt6Pdf present at runtime; where the system's QtPdf is older than that, the import
+# fails on one undefined QPdfDocument::render overload and the viewer cannot render at
+# all. The shim supplies exactly that symbol, and bin/omarchy-pdf-qtpdf-compat decides
+# when to preload it, so it is inert on a coherent system. Needs a C++ compiler and the
+# QtPdf headers of the installed Qt.
+SHIM_DIR="$SHARE_DIR/qtpdf-compat"
+shim_rc=0
+build_out="$("$PLUGIN_DIR/tools/build-qtpdf-compat.sh" --out "$PLUGIN_DIR/shim/build" 2>&1)" || shim_rc=$?
+if (( shim_rc == 0 )); then
+  echo "  ${build_out#qtpdf-compat: }"
+  SHIM_SO="$PLUGIN_DIR/shim/build/libqt6pdf-compat.so"
+  if (( EUID == 0 )); then
+    mkdir -p "$SHIM_DIR" && cp "$SHIM_SO" "$SHIM_DIR/"
+    echo "  Installed the QtPdf compat shim to $SHIM_DIR"
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo bash -c "mkdir -p '$SHIM_DIR' && cp '$SHIM_SO' '$SHIM_DIR/'"
+    echo "  Installed the QtPdf compat shim to $SHIM_DIR"
+  else
+    echo "  WARNING: could not install the QtPdf compat shim to $SHIM_DIR (need root)."
+  fi
+elif (( shim_rc == 3 )); then
+  echo "  WARNING: QtPdf compat shim not built (no C++ compiler or no QtPdf headers)."
+  echo "           Only needed while python-pyqt6 is built against a newer Qt than libQt6Pdf."
+else
+  echo "  WARNING: QtPdf compat shim build failed:"
+  echo "           $build_out"
 fi
 
 # ── 4. Default PDF handler ────────────────────────────────────────────────────

@@ -2,6 +2,41 @@
 
 All notable changes to omarchy-pdf are documented here.
 
+## [2.0.6] — 2026-11-02
+
+### Fixed
+- **A viewer that was dead while the suite reported a green run.** PyQt6's QtPdf module is
+  generated against the Qt it was *built* against but links the `libQt6Pdf.so.6` present at
+  runtime. `python-pyqt6 6.11.0-4` was built against Qt 6.12 and therefore asks for the Qt 6.12
+  overload `QPdfDocument::render(int, QSize, QPdfDocumentRenderOptions, QImage::Format, QColor)`
+  — a symbol a system whose QtPdf is still 6.11 does not export. `import PyQt6.QtPdf` then dies
+  with an undefined symbol, so *every* render path was dead (Super+D printed "no python3 with
+  PyQt6.QtPdf"), while `pacman` saw a consistent system: `python-pyqt6` declares no dependency
+  on the Qt package whose library it needs. Worse, the Qt integration suite silently skipped
+  its 20 Qt tests and still said OK, so the breakage was invisible from the test output.
+
+### Added
+- **`shim/qtpdf-compat.cpp` — a one-symbol ABI compat library.** It defines the Qt 6.12
+  `QPdfDocument::render` overload (emitted from a free function carrying the exact mangled
+  name, since the installed header declares no such member) and forwards to the 4-arg overload
+  that both Qt 6.11 and 6.12 still export, so it stays correct after the system catches up.
+  Verified byte-identical to the render through the older bindings, and the plugin's own
+  integration suite (24 tests) plus the viewer e2e render real pages under it.
+- **`bin/omarchy-pdf-qtpdf-compat` — the one decision about it.** It prints the library only
+  when the interpreter's `import PyQt6.QtPdf` fails *on that symbol* and preloading the shim
+  makes that very interpreter import — proven, not assumed — so an unrecognised ABI gap (or a
+  missing PyQt6) reports nothing instead of handing the launcher a bogus fix. The launcher,
+  `tools/run_tests.sh` and `install.sh` all go through it; on a coherent system nothing is ever
+  preloaded. `tools/build-qtpdf-compat.sh` builds the shim (C++ compiler + QtPdf headers), and
+  `install.sh` installs it beside the plugin; no package is downgraded and no Qt file is
+  replaced.
+- **`tests/test_integration_qtpdf_binding.py` — the guard against the silent green.** PyQt6
+  installed but unable to import QtPdf is now a FAILED test that names the cause and the fix,
+  instead of a skipped Qt suite. `tests/shell/test_qtpdf_compat.sh` drives the decision with
+  stub interpreters and checks the built artifact really exports the overload under the `Qt_6`
+  version tag; `tools/run_tests.sh` preloads the shim so the Qt tests RUN rather than skip
+  (20 skipped tests → 24 that execute).
+
 ## [2.0.5] — 2026-10-17
 
 ### Fixed

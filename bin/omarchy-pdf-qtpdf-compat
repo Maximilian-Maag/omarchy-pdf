@@ -1,0 +1,86 @@
+#!/bin/bash
+# omarchy-pdf: decide whether a python needs the QtPdf ABI compatibility shim.
+#
+# Why this exists. PyQt6's QtPdf module is generated against the Qt version it was
+# built against, but it links the *soname* (libQt6Pdf.so.6) present at runtime. Arch
+# shipped python-pyqt6 6.11.0-4 built against Qt 6.12, so it asks libQt6Pdf for
+#
+#     QPdfDocument::render(int, QSize, QPdfDocumentRenderOptions, QImage::Format, QColor)
+#
+# a symbol Qt 6.11 does not export — and `import PyQt6.QtPdf` dies with an undefined
+# symbol, taking the whole viewer with it. pacman sees a consistent system, because
+# python-pyqt6 declares no dependency on the Qt package whose library it needs.
+# shim/qtpdf-compat.cpp supplies that one symbol and forwards to the 4-arg overload
+# both Qt 6.11 and 6.12 export.
+#
+# This script only DECIDES; tools/build-qtpdf-compat.sh builds the shim, and the
+# launcher plus tools/run_tests.sh set LD_PRELOAD from this output.
+#
+# Usage:
+#   omarchy-pdf-qtpdf-compat preload <python>   print the library to preload, or nothing
+#
+# The preload is printed only when BOTH hold:
+#   * `import PyQt6.QtPdf` fails with the QPdfDocument::render undefined symbol this
+#     shim knows how to close (any other failure — no PyQt6 at all — reports nothing,
+#     because preloading something cannot fix it), and
+#   * preloading the shim makes that very interpreter import successfully, so the
+#     answer is proven rather than assumed.
+# On a coherent system the import succeeds and nothing is printed.
+#
+# The library is searched in: $OMARCHY_PDF_QTDPDF_COMPAT (when set, that path alone —
+# the seam tests and operators use), then the installed share dir, then a build from
+# this checkout.
+
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SYMBOL="QPdfDocument6render"
+USAGE="usage: omarchy-pdf-qtpdf-compat preload <python>"
+E_USAGE=2
+
+lib_path() {
+  local candidate
+  if [[ -n ${OMARCHY_PDF_QTDPDF_COMPAT:-} ]]; then
+    if [[ -f $OMARCHY_PDF_QTDPDF_COMPAT ]]; then
+      printf '%s\n' "$OMARCHY_PDF_QTDPDF_COMPAT"
+      return 0
+    fi
+    return 1
+  fi
+  for candidate in "$HERE/../share/omarchy-pdf/qtpdf-compat/libqt6pdf-compat.so" \
+                   "$HERE/../shim/build/libqt6pdf-compat.so"; do
+    if [[ -f $candidate ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+preload_for() { # <python>
+  local python="$1" lib out
+  if ! lib="$(lib_path)"; then
+    return 0                       # no shim built: nothing to offer, nothing claimed
+  fi
+  if out="$("$python" -c 'import PyQt6.QtPdf' 2>&1)"; then
+    return 0                       # the system is coherent: never preload
+  fi
+  if [[ $out != *"$SYMBOL"* ]]; then
+    return 0                       # some other breakage (e.g. no PyQt6): not ours
+  fi
+  if out="$(LD_PRELOAD="$lib" "$python" -c 'import PyQt6.QtPdf' 2>&1)"; then
+    printf '%s\n' "$lib"           # proven: this interpreter imports with the shim
+  fi
+  return 0
+}
+
+if [[ ${1:-} != "preload" ]]; then
+  echo "$USAGE" >&2
+  exit "$E_USAGE"
+fi
+if [[ -z ${2:-} ]]; then
+  echo "$USAGE" >&2
+  exit "$E_USAGE"
+fi
+
+preload_for "$2"

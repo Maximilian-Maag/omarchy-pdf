@@ -64,6 +64,21 @@
       ]
     },
     {
+      "path": "bin/omarchy-pdf-qtpdf-compat",
+      "lang": "shell",
+      "tests": [
+        "bash",
+        "tests/shell/test_qtpdf_compat.sh"
+      ],
+      "equivalent": [
+        {
+          "line": 48,
+          "kind": "number±1",
+          "reason": "lib_path's failure status is only ever consumed by `if ! lib=\"$(lib_path)\"`, which treats every non-zero value alike, so 1 vs 2 is unobservable — proven by applying the mutant and diffing the full test output (identical rc and output)"
+        }
+      ]
+    },
+    {
       "path": "pdf/keymap.py",
       "lang": "python",
       "tests": [
@@ -157,7 +172,7 @@
     },
     {
       "path": "bin/omarchy-pdf",
-      "reason": "launcher: interpreter/package discovery only; its argv assembly is verified by the shell test and the full app is booted by the e2e"
+      "reason": "launcher: interpreter/package discovery only; its argv assembly is verified by the shell test and the full app is booted by the e2e, and the QtPdf compat preload decision it consults lives in bin/omarchy-pdf-qtpdf-compat, which IS a mutation target"
     },
     {
       "path": "pdf/view.py",

@@ -1,0 +1,9 @@
+/* Only the one symbol the shim exists for, exported under the Qt_6 version tag the
+   binding's undefined reference carries; everything else stays private so a preload
+   cannot shadow anything it does not mean to. */
+Qt_6 {
+  global:
+    _ZN12QPdfDocument6renderEi5QSize25QPdfDocumentRenderOptionsN6QImage6FormatE6QColor;
+  local:
+    *;
+};
