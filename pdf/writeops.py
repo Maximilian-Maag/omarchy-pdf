@@ -171,7 +171,8 @@ def redact(path: str, *args) -> str:
         if not _stamp(rect, size, stamp):
             return "could not build the redaction stamp (ghostscript needed)"
         dest = _with_suffix(path, "redacted")
-        code, _out, err = run(["qpdf", "--overlay", stamp, "--", raster, dest])
+        code, _out, err = run(
+            ["qpdf", "--overlay", stamp, "--to=%d" % page, "--", raster, dest])
         if code != 0:
             return f"overlay failed: {err.strip()[:160]}"
         return f"redacted region on page {page} (rasterised, text removed) -> {dest}"
