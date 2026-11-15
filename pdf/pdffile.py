@@ -111,6 +111,22 @@ def _set_key(body: bytes, key: bytes, value: bytes) -> bytes:
     return body[:close] + b"/" + key + b" " + value + b" " + body[close:]
 
 
+def _append_ref(body: bytes, key: bytes, ref: bytes) -> bytes:
+    """Append ``ref`` to the ``/key [ … ]`` array in a dict body, creating it if absent.
+
+    Unlike :func:`_set_key` (which *replaces* the whole value), this preserves the
+    array's existing entries, so adding an annotation never drops the ones already
+    on the page.
+    """
+    pattern = re.compile(rb"/" + key + rb"\s*\[([^\]]*)\]")
+    match = pattern.search(body)
+    if match is None:
+        return _set_key(body, key, b"[" + ref + b"]")
+    existing = match.group(1).strip()
+    merged = existing + b" " + ref if existing else ref
+    return body[:match.start()] + b"/" + key + b" [" + merged + b"]" + body[match.end():]
+
+
 def _values_for(objects: dict[int, bytes], name: str,
                 value: str) -> tuple[int, bytes] | None:
     """(object number, new body) for the named field, or None.
@@ -235,8 +251,8 @@ def add_annotation(path: str, page_index: int, rect: tuple[float, float, float, 
              % (kind.encode("ascii"),
                 " ".join("%.2f" % v for v in rect).encode("ascii"),
                 _encode_pdf_string(text)))
-    page = _set_key(objects[page_number], b"Annots",
-                    b"[%d 0 R]" % next_number)
+    page = _append_ref(objects[page_number], b"Annots",
+                       b"%d 0 R" % next_number)
     payload = incremental_update(base, {page_number: page}, extra={next_number: annot})
     with open(dest, "wb") as handle:
         handle.write(payload)

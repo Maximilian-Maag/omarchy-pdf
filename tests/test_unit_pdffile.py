@@ -4,6 +4,7 @@ The pure functions are tested directly on bytes; fill_form/add_annotation are
 exercised end to end when qpdf is present (the only external dependency).
 """
 import pathlib
+import re
 import shutil
 import sys
 import tempfile
@@ -119,6 +120,32 @@ class SetKeyCase(unittest.TestCase):
                          b"/FT /Tx /V (x) >>")
 
 
+class AppendRefCase(unittest.TestCase):
+    """_append_ref must ADD to an existing array, never replace it.
+
+    Bug pinned: add_annotation used _set_key, which replaces the whole /Annots
+    value, so every annotation already on the page was destroyed (count=1).
+    """
+    def test_appends_to_existing_array(self):
+        body = b"<< /Type /Page /Annots [11 0 R 12 0 R] >>"
+        self.assertEqual(pdffile._append_ref(body, b"Annots", b"13 0 R"),
+                         b"<< /Type /Page /Annots [11 0 R 12 0 R 13 0 R] >>")
+
+    def test_creates_the_array_when_absent(self):
+        self.assertEqual(pdffile._append_ref(b"<< /Type /Page >>", b"Annots", b"13 0 R"),
+                         b"<< /Type /Page /Annots [13 0 R] >>")
+
+    def test_empty_existing_array_is_filled(self):
+        self.assertEqual(pdffile._append_ref(b"<< /Annots [] >>", b"Annots", b"13 0 R"),
+                         b"<< /Annots [13 0 R] >>")
+
+    def test_only_the_named_key_is_touched(self):
+        # /Annots here is empty while a sibling array must be left intact
+        body = b"<< /Kids [3 0 R] /Annots [] >>"
+        self.assertEqual(pdffile._append_ref(body, b"Annots", b"13 0 R"),
+                         b"<< /Kids [3 0 R] /Annots [13 0 R] >>")
+
+
 class IncrementalCase(unittest.TestCase):
     """incremental_update is pure — these must not need qpdf (CI has none)."""
     def setUp(self):
@@ -202,6 +229,27 @@ class AuthorCase(unittest.TestCase):
         base, _err = pdffile._normalise(dest)
         self.assertIsNotNone(base)
         self.assertIn(b"/Text", base)
+
+    def test_add_annotation_keeps_existing_annotations(self):
+        # form_pdf's page carries /Annots with the two form widgets. Adding an
+        # annotation must APPEND to that array, not replace it: the old _set_key
+        # path dropped both widgets and left the page with a single /Annots entry.
+        dest = str(self.tmp / "annot2.pdf")
+        pdffile.add_annotation(self.src, 0, (10, 10, 50, 50), "note", dest)
+        base, _err = pdffile._normalise(dest)
+        self.assertIsNotNone(base)
+        objects = pdffile.parse_objects(base or b"")
+        page = next(b for b in objects.values()
+                    if b"/Type /Page" in b and b"/Annots" in b)
+        array = re.search(rb"/Annots\s*\[([^\]]*)\]", page)
+        self.assertIsNotNone(array)
+        assert array is not None
+        refs = re.findall(rb"\d+\s+\d+\s+R", array.group(1))
+        self.assertEqual(len(refs), 3, "the two widgets plus the new annotation")
+        widgets = [n for n, b in objects.items() if b"/Subtype /Widget" in b]
+        texts = [n for n, b in objects.items() if b"/Subtype /Text" in b]
+        self.assertEqual(len(widgets), 2, "both existing form widgets survived")
+        self.assertEqual(len(texts), 1, "the new annotation is present")
 
     def test_page_object_out_of_range(self):
         objects = pdffile.parse_objects(fixtures.form_pdf())
