@@ -19,6 +19,10 @@
         "target": "bin/omarchy-pdf"
       },
       {
+        "source": "bin/omarchy-pdf-qtpdf-compat",
+        "target": "bin/omarchy-pdf-qtpdf-compat"
+      },
+      {
         "source": "bin/omarchy-toggle-pdf-night",
         "target": "bin/omarchy-toggle-pdf-night"
       },
