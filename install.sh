@@ -101,8 +101,11 @@ fi
 
 # ── 5. Night mode on by default (dark rendering) ──────────────────────────────
 if command -v gsettings >/dev/null 2>&1; then
-  gsettings set org.gnome.Papers night-mode true 2>/dev/null || true
-  echo "  Papers night mode enabled by default."
+  if gsettings set org.gnome.Papers night-mode true 2>/dev/null; then
+    echo "  Papers night mode enabled by default."
+  else
+    echo "  WARNING: could not set Papers night mode (gsettings write failed) — set it in Papers manually."
+  fi
 fi
 
 # ── 6. Register keybindings in ~/.config/hypr/bindings.lua ────────────────────
