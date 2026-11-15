@@ -9,8 +9,119 @@ PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 HYPR_CONFIG_DIR="$CONFIG_HOME/hypr"
 BINDINGS="$HYPR_CONFIG_DIR/bindings.lua"
-BIN_DIR="/usr/local/bin"
+BIN_DIR="${OMARCHY_PDF_BIN_DIR:-/usr/local/bin}"
+SHARE_DIR="${OMARCHY_PDF_SHARE_DIR:-/usr/local/share/omarchy-pdf}"
 APP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-pdf"
+MIME_STATE="$STATE_DIR/mime-application-pdf"
+
+# The exact artifacts install adds. --uninstall reverses these lists and nothing else.
+BIN_TOOLS=(omarchy-pdf omarchy-pdf-qtpdf-compat omarchy-toggle-pdf-night omarchy-webapp-qutebrowser omarchy-pdf-sign)
+DESKTOP_ENTRIES=(sign-me-qes.desktop chromium.desktop omarchy-pdf.desktop)
+PDF_MIME="application/pdf"
+PDF_ENTRY="omarchy-pdf.desktop"
+BIND_MARKER='-- omarchy-pdf plugin'
+BIND_LINES=(
+  'o.bind("SUPER + D",         "Documents (omarchy-pdf)",   "/usr/local/bin/omarchy-pdf")'
+  'o.bind("SUPER + CTRL + N",  "PDF dark/light toggle",    "/usr/local/bin/omarchy-toggle-pdf-night")'
+  'o.bind("SUPER + SHIFT + Q", "sign-me (QES signieren)",  { launch = "qutebrowser --target window https://www.sign-me.de/" })'
+)
+
+# Run a command with the privilege install used: root, else sudo, else pkexec.
+priv() {
+  if (( EUID == 0 )); then "$@"
+  elif command -v sudo >/dev/null 2>&1; then sudo "$@"
+  else pkexec "$@"; fi
+}
+
+# remove_installed <dest> <source it must match>
+# A file is ours only if it is a symlink into this checkout or a byte-identical copy of
+# the source install wrote; anything else at that path is somebody else's and is left alone.
+remove_installed() {
+  local dest="$1" src="$2"
+  if [[ -L $dest ]] && [[ "$(readlink -f "$dest")" == "$(readlink -f "$src")" ]]; then
+    priv rm -f "$dest"; echo "  Removed $dest"
+  elif [[ -f $dest ]] && cmp -s "$src" "$dest"; then
+    priv rm -f "$dest"; echo "  Removed $dest"
+  elif [[ -e $dest ]]; then
+    echo "  WARNING: $dest is not ours — left alone."
+  fi
+}
+
+uninstall() {
+  echo "omarchy-pdf: uninstalling"
+
+  # 2. The helper binaries on PATH.
+  local tool
+  for tool in "${BIN_TOOLS[@]}"; do
+    remove_installed "$BIN_DIR/$tool" "$PLUGIN_DIR/bin/$tool"
+  done
+
+  # 3. The desktop entries.
+  local entry
+  for entry in "${DESKTOP_ENTRIES[@]}"; do
+    remove_installed "$APP_DIR/$entry" "$PLUGIN_DIR/config/$entry"
+  done
+  command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APP_DIR" >/dev/null 2>&1 || true
+
+  # 3b. The package + shim share tree: the path is ours alone, so the whole tree goes.
+  if [[ -d $SHARE_DIR ]]; then
+    priv rm -rf "$SHARE_DIR"; echo "  Removed $SHARE_DIR"
+  fi
+
+  # 4. The PDF handler — reverted only while it still points at our entry.
+  if command -v xdg-mime >/dev/null 2>&1; then
+    local cur prev
+    cur="$(xdg-mime query default "$PDF_MIME" 2>/dev/null || true)"
+    if [[ $cur == "$PDF_ENTRY" ]]; then
+      prev=""
+      [[ -f $MIME_STATE ]] && prev="$(cat "$MIME_STATE")"
+      if [[ -n $prev && $prev != "$PDF_ENTRY" ]]; then
+        xdg-mime default "$prev" "$PDF_MIME" >/dev/null 2>&1 && echo "  Default PDF handler reverted to $prev."
+      else
+        echo "  WARNING: a PDF is still opened with $PDF_ENTRY; set another viewer with:"
+        echo "    xdg-mime default <viewer>.desktop $PDF_MIME"
+      fi
+    fi
+  fi
+
+  # 6. The keybindings block, taken out by exact content — never `sed -i`, so the user's
+  # config is only ever rewritten a few lines smaller and nothing in it is interpreted.
+  # install.sh appends a blank line, the marker, then the three bind lines; the whole block
+  # comes back out so a cycle does not stack another marker on the file.
+  if [[ -f $BINDINGS ]] && grep -qF -e "$BIND_MARKER" "$BINDINGS"; then
+    local kept; kept="$(mktemp)"
+    local lines=() out=() line b drop
+    mapfile -t lines < "$BINDINGS"
+    for line in "${lines[@]}"; do
+      if [[ $line == "$BIND_MARKER" ]]; then
+        # Drop the blank line install wrote just before the marker, if it is still there.
+        if (( ${#out[@]} )) && [[ -z ${out[-1]} ]]; then unset 'out[-1]'; fi
+        continue
+      fi
+      drop=0
+      for b in "${BIND_LINES[@]}"; do [[ $line == "$b" ]] && { drop=1; break; }; done
+      (( drop )) && continue
+      out+=("$line")
+    done
+    for line in ${out[@]+"${out[@]}"}; do printf '%s\n' "$line"; done > "$kept"
+    mv "$kept" "$BINDINGS"
+    echo "  Took the omarchy-pdf keybindings back out of $BINDINGS"
+  fi
+
+  # 5-state. The recorded previous handler.
+  if [[ -d $STATE_DIR ]]; then
+    rm -rf "$STATE_DIR"; echo "  Removed $STATE_DIR"
+  fi
+
+  echo ""
+  echo "Done. Run 'hyprctl reload' to drop the keybindings."
+}
+
+if [[ ${1:-} == --uninstall ]]; then
+  uninstall
+  exit 0
+fi
 
 echo "omarchy-pdf: installing from $PLUGIN_DIR"
 
@@ -54,7 +165,6 @@ command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$
 echo "  Installed desktop entries into $APP_DIR"
 
 # ── 3b. The viewer package, under a stable share path the launcher finds ──────
-SHARE_DIR="/usr/local/share/omarchy-pdf"
 if (( EUID == 0 )); then
   rm -rf "$SHARE_DIR/pdf"; mkdir -p "$SHARE_DIR"; cp -r "$PLUGIN_DIR/pdf" "$SHARE_DIR/pdf"
   echo "  Installed the pdf package to $SHARE_DIR"
@@ -94,8 +204,13 @@ else
 fi
 
 # ── 4. Default PDF handler ────────────────────────────────────────────────────
+# The handler that was in place is recorded first, so --uninstall can put it back
+# instead of leaving the user with no PDF handler at all. Recorded once: a re-install
+# must not overwrite the original with our own entry.
 if command -v xdg-mime >/dev/null 2>&1; then
-  xdg-mime default omarchy-pdf.desktop application/pdf >/dev/null 2>&1 || true
+  mkdir -p "$STATE_DIR"
+  [[ -f $MIME_STATE ]] || xdg-mime query default "$PDF_MIME" > "$MIME_STATE" 2>/dev/null || : > "$MIME_STATE"
+  xdg-mime default omarchy-pdf.desktop "$PDF_MIME" >/dev/null 2>&1 || true
   echo "  Default PDF handler -> omarchy-pdf."
 fi
 
