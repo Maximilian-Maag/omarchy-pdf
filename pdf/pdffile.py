@@ -226,11 +226,57 @@ def fill_form(path: str, values: dict[str, str], dest: str) -> str:
     return note
 
 
+_PAGE = re.compile(rb"/Type\s*/Page(?![s\w])")
+_KIDS = re.compile(rb"/Kids\s*\[([^\]]*)\]")
+_REF = re.compile(rb"(\d+)\s+\d+\s+R")
+
+
+def _collect_pages(objects: dict[int, bytes], number: int, order: list[int],
+                   seen: set[int]) -> None:
+    """Append `number` and its descendants to `order` in the tree's /Kids order."""
+    if number in seen:                       # malformed tree with a cycle
+        return
+    seen.add(number)
+    body = objects.get(number)
+    if body is None:
+        return
+    if _PAGE.search(body):                   # a leaf page, not the /Pages node
+        order.append(number)
+        return
+    kids = _KIDS.search(body)
+    if kids is None:
+        return
+    for ref in _REF.findall(kids.group(1)):
+        _collect_pages(objects, int(ref), order, seen)
+
+
+def _page_order(objects: dict[int, bytes]) -> list[int]:
+    """Page object numbers in the page tree's /Kids order.
+
+    Object NUMBER does not encode page order: a document may list
+    ``/Kids [5 0 R 3 0 R]`` so page 1 is object 5 and page 2 is object 3. Sorting
+    the page objects by number (the old behaviour) therefore annotated the wrong
+    page. Resolve the order by walking from the catalog's /Pages root, falling
+    back to object order only when there is no usable tree.
+    """
+    root = None
+    for number, body in objects.items():
+        if re.search(rb"/Type\s*/Catalog\b", body):
+            match = re.search(rb"/Pages\s+(\d+)\s+\d+\s+R", body)
+            if match:
+                root = int(match.group(1))
+            break
+    order: list[int] = []
+    if root is not None:
+        _collect_pages(objects, root, order, set())
+    if order:
+        return order
+    return sorted(n for n, b in objects.items() if _PAGE.search(b))
+
+
 def _page_object(objects: dict[int, bytes], page_index: int) -> int | None:
-    """Object number of the Nth page (``/Type /Page`` but not ``/Pages``)."""
-    pages = [n for n, b in objects.items()
-             if re.search(rb"/Type\s*/Page(?![s\w])", b)]
-    pages.sort()
+    """Object number of the Nth page, in the page tree's /Kids order."""
+    pages = _page_order(objects)
     if 0 <= page_index < len(pages):
         return pages[page_index]
     return None

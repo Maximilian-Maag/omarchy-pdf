@@ -86,6 +86,23 @@ def non_a4_pdf() -> bytes:
     })
 
 
+def two_page_kids_reordered_pdf() -> bytes:
+    """Two pages whose /Kids order is the REVERSE of their object numbering.
+
+    Page 1 is object 5 and page 2 is object 3, so anything that resolves page
+    order by object number annotates page 2 when asked for page 1.
+    """
+    return build({
+        1: b"<< /Type /Catalog /Pages 2 0 R >>",
+        2: b"<< /Type /Pages /Kids [5 0 R 3 0 R] /Count 2 >>",
+        3: _page(2, 4),          # object 3 = SECOND page
+        4: _stream(b"Second page body"),
+        5: _page(2, 6),          # object 5 = FIRST page
+        6: _stream(b"First page body"),
+        9: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    })
+
+
 def layer_pdf() -> bytes:
     """One page plus one optional-content group (a layer named 'Watermark')."""
     return build({

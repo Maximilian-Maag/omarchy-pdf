@@ -196,6 +196,44 @@ class PageObjectCase(unittest.TestCase):
         self.assertIsNone(pdffile._page_object(self.objects, 1))
 
 
+class PageOrderCase(unittest.TestCase):
+    """_page_object must follow the /Kids tree, not the object numbering.
+
+    Bug pinned: pages.sort() ordered by object NUMBER, so a document whose
+    /Kids order differs from its object numbers annotated the wrong page.
+    """
+    def setUp(self):
+        self.objects = pdffile.parse_objects(fixtures.two_page_kids_reordered_pdf())
+
+    def test_page_order_is_the_kids_order(self):
+        self.assertEqual(pdffile._page_order(self.objects), [5, 3])
+
+    def test_first_page_is_the_lowest_object_only_by_number(self):
+        # The FIRST page is object 5 (the /Kids head), NOT object 3 as sorting
+        # by object number would claim.
+        self.assertEqual(pdffile._page_object(self.objects, 0), 5)
+
+    def test_second_page_is_the_trailing_kid(self):
+        self.assertEqual(pdffile._page_object(self.objects, 1), 3)
+
+    def test_falls_back_to_object_order_without_a_tree(self):
+        # No catalog /Pages reference -> object order is the best guess.
+        objects = {n: b for n, b in self.objects.items() if n != 1}
+        self.assertEqual(pdffile._page_order(objects), [3, 5])
+
+    def test_nested_page_tree_is_walked_depth_first(self):
+        # /Kids may point at an intermediate /Pages node: page order is the
+        # depth-first flattening of the whole tree.
+        nested = {
+            1: b"<< /Type /Catalog /Pages 2 0 R >>",
+            2: b"<< /Type /Pages /Kids [7 0 R 8 0 R] /Count 2 >>",
+            7: b"<< /Type /Pages /Kids [9 0 R] /Count 1 >>",
+            8: b"<< /Type /Page /Parent 2 0 R >>",
+            9: b"<< /Type /Page /Parent 7 0 R >>",
+        }
+        self.assertEqual(pdffile._page_order(nested), [9, 8])
+
+
 @unittest.skipUnless(HAVE_QPDF, "qpdf is required for the authoring path")
 class AuthorCase(unittest.TestCase):
     def setUp(self):
@@ -254,6 +292,25 @@ class AuthorCase(unittest.TestCase):
     def test_page_object_out_of_range(self):
         objects = pdffile.parse_objects(fixtures.form_pdf())
         self.assertIsNone(pdffile._page_object(objects, 1))
+
+    def test_annotates_the_first_page_in_kids_order(self):
+        # End to end: the annotation must land on the /Kids head — the page whose
+        # content is "First page body" — not on the lower-numbered object 3.
+        src = fixtures.write(self.tmp / "reordered.pdf",
+                             fixtures.two_page_kids_reordered_pdf())
+        dest = str(self.tmp / "reordered-annot.pdf")
+        pdffile.add_annotation(src, 0, (5, 5, 25, 25), "note", dest)
+        base, _err = pdffile._normalise(dest)
+        self.assertIsNotNone(base)
+        objects = pdffile.parse_objects(base or b"")
+        annotated = next(b for b in objects.values()
+                         if b"/Type /Page" in b and b"/Annots" in b)
+        contents = re.search(rb"/Contents\s+(\d+)\s+\d+\s+R", annotated)
+        self.assertIsNotNone(contents)
+        assert contents is not None
+        stream = objects[int(contents.group(1))]
+        self.assertIn(b"First page body", stream,
+                      "the annotation must be on the page /Kids lists first")
 
     def test_annotation_bad_page(self):
         note = pdffile.add_annotation(self.src, 99, (0, 0, 1, 1), "x",
