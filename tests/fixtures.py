@@ -74,6 +74,18 @@ def form_pdf() -> bytes:
     })
 
 
+def non_a4_pdf() -> bytes:
+    """One page whose MediaBox is 300 x 200 (NOT A4) — for redaction geometry."""
+    return build({
+        1: b"<< /Type /Catalog /Pages 2 0 R >>",
+        2: b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        3: (b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] "
+            b"/Resources << /Font << /F1 9 0 R >> >> /Contents 4 0 R >>"),
+        4: _stream(b"Small page"),
+        9: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    })
+
+
 def layer_pdf() -> bytes:
     """One page plus one optional-content group (a layer named 'Watermark')."""
     return build({

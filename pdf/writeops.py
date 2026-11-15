@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import glob
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -180,15 +181,22 @@ def redact(path: str, *args) -> str:
         shutil.rmtree(work, ignore_errors=True)
 
 
+_SIZE = re.compile(r"size:\s*([\d.]+)\s*x\s*([\d.]+)")
+
+
 def _page_size(path: str, page_index: int) -> tuple[float, float]:
-    """(width, height) of a 1-based page from pdfinfo's ``Page N size`` line."""
+    """(width, height) of a 1-based page from pdfinfo's ``Page N size`` line.
+
+    The line looks like ``Page    1 size:  300 x 200 pts`` — the size is the two
+    numbers AFTER the ``size:`` label, ``W x H``. Splitting on ``size`` and taking
+    the first whitespace token picked up the ``:`` and raised, so every page fell
+    back to A4 and a stamp was scaled/misplaced onto a non-A4 page.
+    """
     code, out, _err = run(["pdfinfo", "-f", str(page_index), "-l", str(page_index), path])
     if code == 0:
         for line in out.splitlines():
             if line.startswith("Page") and "size" in line:
-                parts = line.split("size", 1)[1].split()
-                try:
-                    return float(parts[0]), float(parts[1].rstrip("acm"))
-                except (ValueError, IndexError):
-                    break
+                match = _SIZE.search(line)
+                if match:
+                    return float(match.group(1)), float(match.group(2))
     return 595.0, 842.0

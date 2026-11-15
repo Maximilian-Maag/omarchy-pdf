@@ -36,8 +36,8 @@ def _render_gray(pdf: str, page: int, dpi: int, out_stem: str) -> str:
     return str(matches[0])
 
 
-def _dark_fraction(pgm_path: str) -> float:
-    """Fraction of pixels darker than mid-grey in a binary PGM (P5)."""
+def _pgm_pixels(pgm_path: str):
+    """(width, height, pixel bytes) for a binary PGM (P5)."""
     data = pathlib.Path(pgm_path).read_bytes()
     if not data.startswith(b"P5"):
         raise ValueError("not a P5 PGM")
@@ -62,7 +62,12 @@ def _dark_fraction(pgm_path: str) -> float:
 
     width, height, _max = (int(token()) for _ in range(3))
     idx += 1  # the single whitespace byte after maxval
-    pixels = data[idx:idx + width * height]
+    return width, height, data[idx:idx + width * height]
+
+
+def _dark_fraction(pgm_path: str) -> float:
+    """Fraction of pixels darker than mid-grey in a binary PGM (P5)."""
+    width, height, pixels = _pgm_pixels(pgm_path)
     dark = sum(1 for b in pixels if b < 128)
     return dark / (width * height)
 
@@ -91,6 +96,49 @@ class RedactPageCase(unittest.TestCase):
                         "page 1 must NOT carry the box (it did before the fix)")
         self.assertLess(fracs[2], fracs[3] / 3.0,
                         "page 2 must be left alone")
+
+
+@unittest.skipUnless(all(shutil.which(t) for t in NEEDED),
+                     "poppler/qpdf/ghostscript are required for the redaction path")
+class RedactNonA4Case(unittest.TestCase):
+    """Regression: the redaction box must land at the requested coordinates.
+
+    Bug pinned: _page_size never parsed the real page size (it split on "size",
+    took the ":" token and raised), so it returned the hardcoded A4 (595x842) for
+    EVERY page. On a 300x200 page the stamp was built in an A4 coordinate space and
+    then scaled onto the real page, so the box landed at the wrong place and size.
+    """
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="pdf-redact-a4reg-"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.src = fixtures.write(self.tmp / "small.pdf", fixtures.non_a4_pdf())
+
+    def test_page_size_is_parsed_from_pdfinfo(self):
+        self.assertEqual(writeops._page_size(self.src, 1), (300.0, 200.0))
+
+    def test_box_lands_at_the_requested_coordinates(self):
+        # Rect (150,100)-(250,160) on a 300x200 page. Its centre in PDF space is
+        # (200,130); the rendered pixel there must be dark, and a pixel well
+        # outside the box must stay light.
+        note = writeops.redact(self.src, "1", "150", "100", "250", "160")
+        self.assertIn("page 1", note)
+        dest = str(self.tmp / "small-redacted.pdf")
+        pgm = _render_gray(dest, 1, 72, str(self.tmp / "p"))
+        width, height, pixels = _pgm_pixels(pgm)
+
+        def dark_at(pdf_x, pdf_y):
+            col = int(pdf_x / 300.0 * width)
+            row = int((200.0 - pdf_y) / 200.0 * height)
+            return pixels[row * width + col] < 128
+
+        self.assertTrue(dark_at(200, 130), "the box centre must be dark")
+        self.assertFalse(dark_at(30, 30), "outside the box must stay light")
+
+        # The covered area is (100 x 60) / (300 x 200) == exactly 10%. The A4-size
+        # bug scaled the box down to ~0.6%, which this bound excludes.
+        frac = sum(1 for b in pixels if b < 128) / (width * height)
+        self.assertGreater(frac, 0.07, "the box must cover ~10% of the page")
+        self.assertLess(frac, 0.13)
 
 
 if __name__ == "__main__":
