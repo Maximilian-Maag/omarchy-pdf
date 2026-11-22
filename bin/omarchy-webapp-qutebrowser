@@ -1,25 +1,49 @@
 #!/bin/bash
-# omarchy:summary=Launch a URL as a web app in qutebrowser (Chromium-free Omarchy)
-# omarchy:args=--app=<url> [--dry-run]
+# omarchy:summary=Open a web app or a clicked link in qutebrowser (Chromium-free Omarchy)
+# omarchy:args=--app=<url> | <url> [--dry-run]
 # omarchy:examples=omarchy-webapp-qutebrowser --app=https://example.com
 
 # Omarchy's omarchy-launch-webapp falls back to chromium.desktop for its --app=
-# windows. With Chromium removed this shim is installed as the Exec named by a
-# user-level chromium.desktop, so that path opens in qutebrowser instead.
+# windows, and every link the desktop hands to the default browser arrives
+# through the same chromium.desktop entry (xdg-open, Thunderbird, a portal). With
+# Chromium removed this shim is installed as that entry's Exec, so both land in
+# qutebrowser.
+#
+# The two shapes are different requests and must not be collapsed into one:
+#   --app=<url>  a web app — it gets a window of its own (--target window), so it
+#                looks like the app it stands in for.
+#   <url>        a link someone clicked — it opens as a tab (--target tab) in the
+#                running browser. A window per click is not what a click means,
+#                and silently dropping the URL (which is what treating only
+#                --app= as a URL did) lands the user on the start page instead of
+#                the target.
+#
 # --dry-run prints the command it would run, which is how it is tested.
 
 set -euo pipefail
 
 url=""
+webapp=""
 dry_run=""
 
 for arg in "$@"; do
   case $arg in
     --app=*)
+      webapp=1
       url="${arg#--app=}"
+      ;;
+    --app)
+      webapp=1
       ;;
     --dry-run)
       dry_run=1
+      ;;
+    -*)
+      ;;                        # any other flag the desktop passed: not a URL
+    *)
+      if [[ -z $url ]]; then
+        url="$arg"
+      fi
       ;;
   esac
 done
@@ -28,9 +52,15 @@ if [[ -z $url ]]; then
   exec qutebrowser
 fi
 
+if [[ -n $webapp ]]; then
+  target=window
+else
+  target=tab
+fi
+
 if [[ -n $dry_run ]]; then
-  printf 'qutebrowser --target window %s\n' "$url"
+  printf 'qutebrowser --target %s %s\n' "$target" "$url"
   exit 0
 fi
 
-exec qutebrowser --target window "$url"
+exec qutebrowser --target "$target" "$url"
