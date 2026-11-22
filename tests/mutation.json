@@ -42,9 +42,19 @@
       ],
       "equivalent": [
         {
-          "line": 22,
+          "line": 32,
           "kind": "number±1",
-          "reason": "dry_run is only ever tested with [[ -n $dry_run ]], so the sentinel 1 vs 2 is indistinguishable — proven identical by diffing the full test output"
+          "reason": "webapp is only ever tested with [[ -n $webapp ]], so the sentinel 1 vs 2 is indistinguishable — proven by applying the mutant and diffing the full test output against the baseline (identical rc and output)"
+        },
+        {
+          "line": 36,
+          "kind": "number±1",
+          "reason": "the --app (space-separated) branch sets the same webapp sentinel, which only [[ -n $webapp ]] reads, so 1 vs 2 is unobservable — proven by diffing the full test output (identical rc and output)"
+        },
+        {
+          "line": 39,
+          "kind": "number±1",
+          "reason": "dry_run is only ever tested with [[ -n $dry_run ]], so the sentinel 1 vs 2 is indistinguishable — proven by diffing the full test output (identical rc and output)"
         }
       ]
     },
