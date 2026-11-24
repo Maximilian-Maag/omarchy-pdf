@@ -23,7 +23,8 @@ the way qutebrowser owns its interaction over QtWebEngine.
 | `zw` `zp` | fit width / fit page |
 | `r` `R` | rotate 90° cw / ccw |
 | `/` `?` | search forward / backward (then `n` `N`) |
-| `f` `F` | **hint mode** — follow / open links by label |
+| `f` `F` | **hint mode** — `f` follows any link, `F` opens an external one in the browser |
+| *click* on a link | follow it (internal destination → jump, external URI → browser) |
 | `<Ctrl-o>` `<Ctrl-i>` | history back / forward |
 | `o` | open a document |
 | `t` `b` | toggle the outline sidebar |

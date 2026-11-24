@@ -2,6 +2,24 @@
 
 All notable changes to omarchy-pdf are documented here.
 
+## [Unreleased]
+
+### Fixed
+- **Clicking a link in a PDF did nothing.** `pdf/view.py` had no mouse handling at all, so
+  a click on a link annotation was swallowed by `QGraphicsView` and a perfectly healthy
+  link read as broken — the keyboard hint (`f` + label) was the only way in, and nothing
+  on screen said so. A plain left click now follows the link (internal destination → jump,
+  external URI → browser), the pointer turns into a hand over one, and hint mode keeps the
+  click for itself so a label can still be typed.
+- **Hint labels drifted off the link as soon as the page was zoomed.** `open_hints()` placed
+  `QPdfLinkModel` rectangles — which are always in PDF points — by translating them with the
+  page origin and nothing else, which is only right at 100 % and 0°. They are now mapped
+  through the page's zoom and, on a rotated page, rotated about the page centre; the pointer
+  hit-test uses the same mapping, so the box that names a link is the box that clicks it.
+- **`F` (`hint-open`) did exactly the same thing as `f`.** `open_hints(kind)` accepted the
+  kind and never read it, so "open a link in the browser" could not differ from "follow a
+  link". `F` now lists only the links that have a URL, which is what it promises.
+
 ## [2.0.6] — 2026-11-02
 
 ### Fixed

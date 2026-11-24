@@ -144,6 +144,21 @@ view.quit()
 This is what lets the *entire* vim workflow be tested head-less against a fake view, and
 why the keymap/command layer can reach 100 % mutation kill without a display.
 
+The protocol says nothing about the pointer, but the view is not keyboard-*only*: a plain
+left click on a link annotation follows it, exactly as `f` would (internal destination →
+jump, external URI → browser), and the pointer becomes a hand over a link. Swallowing the
+click is not a neutral choice — it makes a healthy link read as a broken one, and the
+keyboard hint is no substitute for the gesture every other reader supports.
+
+One rule makes the pointer and the hints agree: **`QPdfLinkModel` reports link rectangles
+in PDF points, never in scene units.** They therefore have to be mapped through the page's
+zoom (`_point_scale`) and, on a rotated page, rotated about the page centre. Translating the
+raw points by the page origin is correct at 100 % and 0° only, which is precisely the kind
+of bug that survives a casual look — the labels sit slightly off the link, and a click
+lands beside it. Enforced by
+`tests/test_integration_viewer.py::test_hint_labels_scale_with_zoom` and
+`::test_link_boxes_follow_the_rotation`.
+
 ## 5. Keymap
 
 Modes: `normal`, `command` (the `:` line), `search` (the `/` line), `hint`, `visual`.
@@ -168,6 +183,9 @@ doc ops    i (info)  s (save)  p (print)  a (attachments)  l (layers)
 write ops  e (forms)  A (annotate)  S (sign)  x (redact)  C (ocr)   [write-side tier]
 command    :        q (quit)  ? (help)
 ```
+
+`f` offers every link on the page; `F` offers only the ones carrying a URL, since its
+purpose is to hand the link to the browser.
 
 ## 6. Commands
 

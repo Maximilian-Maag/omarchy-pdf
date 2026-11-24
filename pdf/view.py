@@ -9,6 +9,7 @@ suites instead (a byte of this file is exercised by loading and driving the app)
 
 from __future__ import annotations
 
+import math
 import os
 import subprocess
 
@@ -84,12 +85,17 @@ class PdfView(QGraphicsView):
         self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         self.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        # Links are activated by a plain click, which means the view has to see the
+        # hover too — otherwise the pointer never changes over a link and a reader with
+        # no pointer feedback has no way to tell a link from body text.
+        self.setMouseTracking(True)
 
         self._pages: dict[int, QGraphicsPixmapItem] = {}
         self._positions: dict[int, QRectF] = {}
         self._overlay: list = []
         self._hint_labels: list[str] = []
         self._hint_targets: list = []
+        self._hint_kind = "follow"
         self._hint_typed = ""
         self._outline_indexes: list = []
         self._page = 0
@@ -367,24 +373,109 @@ class PdfView(QGraphicsView):
             self._overlay.append(item)
         self._render_visible()
 
+    # ── links ─────────────────────────────────────────────────────────────
+    def _point_scale(self, index):
+        """Scene units per PDF point on a page: the zoom, and nothing else.
+
+        QtPdf reports link rectangles in points whatever the view does, so every use of
+        one has to scale it — that is the whole bug class fixed here (`open_hints` used
+        to translate the raw points by the page origin, which is only correct at 100 %).
+        On a rotated page the visible width belongs to the page's *height*, because the
+        layout swaps the dimensions for 90°/270°.
+        """
+        rect = self._positions.get(index)
+        size = self.doc.pagePointSize(index)
+        if rect is None:
+            return 1.0
+        span = float(size.height()) if self._rotation % 180 else float(size.width())
+        return rect.width() / span if span else 1.0
+
+    def _rotate_box(self, box, centre):
+        """Rotate a scene rectangle about `centre` by the view rotation, as a bounding box."""
+        angle = math.radians(self._rotation)
+        cos_a, sin_a = math.cos(angle), math.sin(angle)
+        corners = []
+        for point in (box.topLeft(), box.topRight(), box.bottomRight(), box.bottomLeft()):
+            dx, dy = point.x() - centre.x(), point.y() - centre.y()
+            corners.append(QPointF(centre.x() + dx * cos_a - dy * sin_a,
+                                   centre.y() + dx * sin_a + dy * cos_a))
+        return QPolygonF(corners).boundingRect()
+
+    def _link_scene_rect(self, index, area):
+        """Map a link area (PDF points, origin top-left) onto the scene."""
+        rect = self._positions.get(index)
+        if rect is None:
+            return None
+        scale = self._point_scale(index)
+        size = self.doc.pagePointSize(index)
+        # Build the box on an unrotated page centred on the laid-out rectangle: at 90°/
+        # 270° the layout's dimensions are the swapped ones, so the page's own centre is
+        # the only origin both orientations agree on.
+        left = rect.center().x() - float(size.width()) * scale / 2.0
+        top = rect.center().y() - float(size.height()) * scale / 2.0
+        box = QRectF(left + area.x() * scale, top + area.y() * scale,
+                     area.width() * scale, area.height() * scale)
+        if not self._rotation % 360:
+            return box
+        return self._rotate_box(box, rect.center())
+
+    @staticmethod
+    def _link_url(link):
+        """The link's external URL, or "" when it is an internal destination."""
+        url = link.url()
+        return url.toString() if url.isValid() and url.toString() else ""
+
+    def _link_entries(self, index, kind="follow"):
+        """(link, scene rect) for the links on a page, in the order QtPdf lists them.
+
+        `kind` is `follow` for `f` (every link: internal jumps and external URIs) and
+        `open` for `F`, which means "hand it to the browser" and therefore has nothing
+        to offer on an internal destination.
+        """
+        self.link_model.setPage(index)
+        entries = []
+        for row in range(self.link_model.rowCount(QModelIndex())):
+            model_index = self.link_model.index(row, 0)
+            link = self.link_model.data(model_index, QPdfLinkModel.Role.Link.value)
+            area = self.link_model.data(model_index, QPdfLinkModel.Role.Rectangle.value)
+            if link is None or area is None:
+                continue
+            if kind == "open" and not self._link_url(link):
+                continue
+            box = self._link_scene_rect(index, area)
+            if box is None:
+                continue
+            entries.append((link, box))
+        return entries
+
+    def _activate_link(self, link, kind="follow"):
+        """Activate a link the way the reader asked for: browser, else jump."""
+        url = self._link_url(link)
+        if url:
+            self.open_url(url)
+            return
+        page = int(link.page())
+        if page >= 0:
+            self.goto_page(page)
+
+    def _link_at(self, pos):
+        """The link annotation under a scene point, or None."""
+        for index, rect in self._positions.items():
+            if not rect.contains(pos):
+                continue
+            for link, box in self._link_entries(index):
+                if box.contains(pos):
+                    return link
+            return None
+        return None
+
     # ── hints ─────────────────────────────────────────────────────────────
     def open_hints(self, kind="follow"):
         self._clear_hints()
         if not self.page_count():
             return
-        self.link_model.setPage(self._page)
-        rect = self._positions.get(self._page)
-        if rect is None:
-            return
-        count = self.link_model.rowCount(QModelIndex())
-        targets = []
-        for r in range(count):
-            index = self.link_model.index(r, 0)
-            link = self.link_model.data(index, QPdfLinkModel.Role.Link.value)
-            area = self.link_model.data(index, QPdfLinkModel.Role.Rectangle.value)
-            if link is None or area is None:
-                continue
-            targets.append((link, area))
+        self._hint_kind = kind
+        targets = self._link_entries(self._page, kind)
         self._hint_targets = targets
         self._hint_labels = hints_mod.generate_labels(len(targets))
         self._hint_typed = ""
@@ -392,11 +483,10 @@ class PdfView(QGraphicsView):
         font = QFont()
         font.setBold(True)
         font.setPointSize(11)
-        for label, (_link, area) in zip(self._hint_labels, targets):
+        for label, (_link, box) in zip(self._hint_labels, targets):
             item = QGraphicsSimpleTextItem(label)
             item.setBrush(QBrush(color))
             item.setFont(font)
-            box = QRectF(area).translated(rect.topLeft())
             item.setPos(box.center())
             self._scene.addItem(item)
             self._overlay.append(item)
@@ -429,16 +519,10 @@ class PdfView(QGraphicsView):
         if index < 0:
             self.messageRaised.emit("not a hint", "error")
             return
-        link, _area = self._hint_targets[index]
+        link, _box = self._hint_targets[index]
         self._clear_hints()
         self.set_mode("normal")
-        url = link.url()
-        if url.isValid() and url.toString():
-            self.open_url(url.toString())
-            return
-        page = int(link.page())
-        if page >= 0:
-            self.goto_page(page)
+        self._activate_link(link, self._hint_kind)
 
     def _clear_hints(self):
         self._hint_labels = []
@@ -573,6 +657,28 @@ class PdfView(QGraphicsView):
     def op_ocr(self, *args):
         from . import writeops
         self._emit_doc(writeops.ocr, args)
+
+    # ── mouse ─────────────────────────────────────────────────────────────
+    def mousePressEvent(self, event):
+        """A plain left click on a link annotation activates it.
+
+        Every other PDF reader does this, and the viewer's keyboard hints are no
+        replacement for it: a click that does nothing reads as a broken link. Hint mode
+        keeps the click for itself so a label can still be typed.
+        """
+        if event.button() == Qt.MouseButton.LeftButton and self._mode == "normal":
+            link = self._link_at(self.mapToScene(event.position().toPoint()))
+            if link is not None:
+                self._activate_link(link)
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        over_link = self._link_at(self.mapToScene(event.position().toPoint())) is not None
+        self.viewport().setCursor(Qt.CursorShape.PointingHandCursor if over_link
+                                  else Qt.CursorShape.ArrowCursor)
+        super().mouseMoveEvent(event)
 
     # ── keyboard ──────────────────────────────────────────────────────────
     def keyPressEvent(self, event):

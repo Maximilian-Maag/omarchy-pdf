@@ -26,6 +26,8 @@ import fixtures  # noqa: E402
 # than failing, so a bare dev box or a stripped runner does not go red on it.
 try:
     from PyQt6.QtWidgets import QApplication  # noqa: E402
+    from PyQt6.QtCore import QRectF  # noqa: E402
+    from PyQt6.QtPdf import QPdfLinkModel  # noqa: E402
     from pdf import app as app_mod, theme  # noqa: E402
     PALETTE = dict(theme.DEFAULT_PALETTE)
     _QT_IMPORT_ERROR = None
@@ -149,6 +151,125 @@ class ViewerCase(unittest.TestCase):
         self.assertEqual(self.view.mode(), "hint")
         self.assertTrue(self.view._hint_labels)
         self.view.run_command("hint-clear")
+        self.assertEqual(self.view.mode(), "normal")
+
+    # ── links: mouse clicks, hint placement, f vs F ───────────────────────
+    def _load_links(self):
+        """Page 1 of the loaded fixture: one external URI, one internal destination."""
+        path = fixtures.write(self.tmp / "links.pdf", fixtures.mixed_links_pdf())
+        self.view.load(path)
+        self.view.resize(900, 1200)
+        self.view.goto_page(0)
+        self.pump()
+        entries = self.view._link_entries(0)
+        self.assertEqual(len(entries), 2, "fixture should expose two links")
+        external = [box for link, box in entries if self.view._link_url(link)]
+        internal = [box for link, box in entries if not self.view._link_url(link)]
+        self.assertEqual((len(external), len(internal)), (1, 1))
+        return external[0], internal[0]
+
+    def _click(self, scene_point):
+        from PyQt6.QtCore import QEvent, QPointF
+        from PyQt6.QtGui import QMouseEvent
+        from PyQt6.QtCore import Qt as QtCore
+        pos = self.view.mapFromScene(scene_point)
+        event = QMouseEvent(QEvent.Type.MouseButtonPress, QPointF(pos),
+                            QtCore.MouseButton.LeftButton,
+                            QtCore.MouseButton.LeftButton,
+                            QtCore.KeyboardModifier.NoModifier)
+        self.view.mousePressEvent(event)
+        self.qapp.processEvents()
+
+    def test_mouse_click_on_external_link_opens_it(self):
+        # A click on a link annotation is what every other reader does; before this the
+        # view had no mouse handling at all, so the click was swallowed and a perfectly
+        # good link read as broken.
+        external, _internal = self._load_links()
+        opened = []
+        self.view.open_url = opened.append
+        self._click(external.center())
+        self.assertEqual(opened, ["https://omarchy.org/"])
+
+    def test_mouse_click_on_internal_link_jumps_to_its_page(self):
+        _external, internal = self._load_links()
+        self.view.open_url = lambda url: self.fail(f"an internal link must not open {url}")
+        self._click(internal.center())
+        self.assertEqual(self.view.current_page(), 1)
+
+    def test_mouse_click_off_a_link_does_nothing(self):
+        self._load_links()
+        opened = []
+        self.view.open_url = opened.append
+        # the bottom-left corner of page 1 carries no annotation
+        self._click(self.view._positions[0].topLeft())
+        self.assertEqual(opened, [])
+        self.assertEqual(self.view.current_page(), 0)
+
+    def test_mouse_click_in_hint_mode_does_not_activate(self):
+        # hint mode owns the pointer: a stray click must not fire a link while the
+        # reader is typing a label.
+        external, _internal = self._load_links()
+        opened = []
+        self.view.open_url = opened.append
+        self.view.run_command("hint-follow")
+        self._click(external.center())
+        self.assertEqual(opened, [])
+        self.assertEqual(self.view.mode(), "hint")
+
+    def test_hint_labels_scale_with_zoom(self):
+        # QtPdf reports link rectangles in PDF points, so they have to be scaled by the
+        # zoom: the labels used to be translated by the page origin only, which is
+        # correct at 100 % and wrong at every other zoom.
+        self._load_links()
+        self.view.zoom(set_pct=200)
+        page = self.view._positions[0]
+        size = self.view.doc.pagePointSize(0)
+        self.assertAlmostEqual(page.width(), float(size.width()) * 2, delta=0.5)
+        raw = self.view.link_model.data(self.view.link_model.index(0, 0),
+                                        QPdfLinkModel.Role.Rectangle.value)
+        expected = QRectF(page.x() + raw.x() * 2, page.y() + raw.y() * 2,
+                          raw.width() * 2, raw.height() * 2)
+        box = self.view._link_entries(0)[0][1]
+        self.assertAlmostEqual(box.x(), expected.x(), delta=1.0)
+        self.assertAlmostEqual(box.y(), expected.y(), delta=1.0)
+        self.assertAlmostEqual(box.width(), expected.width(), delta=0.5)
+        self.assertAlmostEqual(box.height(), expected.height(), delta=0.5)
+
+    def test_link_boxes_follow_the_rotation(self):
+        # Same root cause as the zoom: the rectangles are reported unrotated, so a
+        # rotated view has to rotate them about the page centre or they fall off the
+        # page (a 612x792 page rotated by 90° is only 612 points tall).
+        self._load_links()
+        self.view.rotate(90)
+        page = self.view._positions[0]
+        entries = self.view._link_entries(0)
+        self.assertEqual(len(entries), 2)
+        for link, box in entries:
+            self.assertTrue(page.contains(box), "a link box must stay on its page")
+            hit = self.view._link_at(box.center())
+            self.assertIsNotNone(hit, "the box centre must hit the link it names")
+            self.assertEqual(self.view._link_url(hit), self.view._link_url(link))
+            self.assertEqual(int(hit.page()), int(link.page()))
+
+    def test_hint_open_offers_only_external_links(self):
+        # `F` means "open in the browser"; an internal destination has no URL, so it is
+        # not a target for it. Before this both keys behaved identically.
+        self._load_links()
+        self.view.run_command("hint-follow")
+        follow = len(self.view._hint_labels)
+        self.view.run_command("hint-clear")
+        self.view.run_command("hint-open")
+        opening = len(self.view._hint_labels)
+        self.view.run_command("hint-clear")
+        self.assertEqual((follow, opening), (2, 1))
+
+    def test_hint_activation_opens_external_link(self):
+        self._load_links()
+        opened = []
+        self.view.open_url = opened.append
+        self.view.run_command("hint-open")
+        self.view.hint_key(self.view._hint_labels[0])
+        self.assertEqual(opened, ["https://omarchy.org/"])
         self.assertEqual(self.view.mode(), "normal")
 
     # ── prompts ───────────────────────────────────────────────────────────
