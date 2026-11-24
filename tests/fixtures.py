@@ -81,6 +81,31 @@ def mixed_links_pdf() -> bytes:
     })
 
 
+def destination_points_pdf() -> bytes:
+    """Two pages, and destinations that name a POINT low inside the target page.
+
+    `/Fit` only names a page, so a viewer that ignores the destination's y
+    coordinate still looks correct with it. `/XYZ 0 172 0` names a spot 620 points
+    below the top of a 792-point page: a viewer that centres the page shows the
+    band 219..573 in a window 354 px high, so the mark lands outside the window and
+    the jump reads as "it went to the page but not to the mark".
+    """
+    return build({
+        1: b"<< /Type /Catalog /Pages 2 0 R /Outlines 10 0 R >>",
+        2: b"<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>",
+        3: _page(2, 4, b" /Annots [11 0 R]"),
+        4: _stream(b"Page one"),
+        5: _page(2, 6),
+        6: _stream(b"Page two"),
+        9: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        10: b"<< /Type /Outlines /First 12 0 R /Last 12 0 R /Count 1 >>",
+        11: (b"<< /Type /Annot /Subtype /Link /Rect [72 700 300 730] "
+             b"/Border [0 0 1] /A << /S /GoTo /D [5 0 R /XYZ 0 172 0] >> >>"),
+        12: (b"<< /Title (A spot on page two) /Parent 10 0 R "
+             b"/Dest [5 0 R /XYZ 0 132 0] >>"),
+    })
+
+
 def form_pdf() -> bytes:
     """One page with a text field and a checkbox."""
     return build({

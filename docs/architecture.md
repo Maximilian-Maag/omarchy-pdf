@@ -127,7 +127,7 @@ answer silently costs you the viewer (see §1).
 
 ```
 view.page_count() -> int            view.current_page() -> int
-view.goto_page(n)                   view.page_label(n) -> str
+view.goto_page(n, point=None)        view.page_label(n) -> str
 view.scroll(dy, dx)                 view.scroll_pages(dy)
 view.zoom(delta_pct=None, set_pct=None, mode=None)   view.zoom_percent() -> int
 view.rotate(delta)                  view.rotation() -> int
@@ -137,6 +137,7 @@ view.mode() / view.set_mode(mode)   view.message(text, level="info")
 view.open_hints(kind="follow")      view.activate_hint(label)
 view.yank(text)                     view.open_url(url)
 view.outline() -> list[tuple[int,str,int]]   view.toggle_sidebar()
+view.outline_destination(row) -> tuple[int, QPointF | None]
 view.load(path, password=None)      view.path() -> str
 view.quit()
 ```
@@ -158,6 +159,25 @@ of bug that survives a casual look — the labels sit slightly off the link, and
 lands beside it. Enforced by
 `tests/test_integration_viewer.py::test_hint_labels_scale_with_zoom` and
 `::test_link_boxes_follow_the_rotation`.
+
+**A destination is a point, and a jump must land on it.** `QPdfLink.location()` and
+`QPdfBookmarkModel.Role.Location` name a spot inside the target page, in the same PDF
+points and top-left origin as a link rectangle, so `_point_scene` maps them with the same
+scale and rotation. `goto_page(index, point)` then scrolls so the mark sits near the top of
+the window. Centring the page instead is invisible on a page that fits — which is why it
+survived this long — but on a page taller than the window it shows the middle and puts a
+heading at the page top *above* the viewport: measured on a 56-page book at fit-width, 8 of
+the first 24 outline entries landed outside the window. Enforced by
+`::test_internal_link_lands_on_its_destination_point` and
+`::test_outline_goto_lands_on_the_bookmark_point`; the fixture uses `/XYZ` destinations,
+because `/Fit` (a page and nothing else) cannot catch this.
+
+**The sidebar is keyboard-reachable or it does not exist.** `t` shows the outline *and*
+moves the keyboard into the tree, selecting the entry for the page being read; `Enter`
+jumps and hands the keys back to the page (`j` in the tree would type-search, not scroll);
+`Esc` leaves the outline. A dock that is visible but never focused is a mouse-only feature
+in a keyboard-driven reader — `itemActivated` was the only path in and nothing could reach
+it. Enforced by `::test_sidebar_takes_the_keyboard_and_escape_returns_it`.
 
 Hints are page-scoped and *view*-scoped, in that order of history:
 

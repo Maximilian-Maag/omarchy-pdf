@@ -5,6 +5,17 @@ All notable changes to omarchy-pdf are documented here.
 ## [Unreleased]
 
 ### Fixed
+- **Internal links and outline entries jumped to the page, not to the mark.** `goto_page`
+  centred the *page*, so on a page taller than the window the page top sat above the
+  viewport and a heading 50 pt below it ended up off-screen: on a real 56-page book at
+  fit-width, 8 of the first 24 outline entries landed outside the window. The destination
+  point (`QPdfLink.location()`, `QPdfBookmarkModel.Role.Location`) is now mapped through
+  the page's zoom and rotation and placed near the top of the window, which is what every
+  other reader does.
+- **The outline sidebar was mouse-only.** `t` revealed the dock and left the focus in the
+  view, so arrow keys went to the page and `itemActivated` — the only keyboard path into
+  the tree — was unreachable. `t` now focuses the tree on the entry for the page being
+  read, `Enter` jumps and returns the keys to the page, and `Esc` leaves the outline.
 - **`f` showed no hints on a page whose links sat on the sheet above it.** Targets were
   collected from `_page` — the page nearest the viewport centre — so on a fit-page spread
   (or a document whose links end on the neighbouring sheet) pressing `f` reported "0 hints"

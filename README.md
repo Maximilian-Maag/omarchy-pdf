@@ -27,7 +27,7 @@ the way qutebrowser owns its interaction over QtWebEngine.
 | *click* on a link | follow it (internal destination → jump, external URI → browser) |
 | `<Ctrl-o>` `<Ctrl-i>` | history back / forward |
 | `o` | open a document |
-| `t` `b` | toggle the outline sidebar |
+| `t` `b` | outline sidebar: reveal it with the keyboard in it, `Enter` jumps, `Esc` goes back to the page |
 | `y` `Y` | yank the selection / the page text |
 | `m` `'` | set / jump to a mark |
 | `i` `s` `p` `a` `<Ctrl-l>` | info, save-as, print, attachments, layers |
