@@ -11,7 +11,7 @@ import os
 import sys
 from urllib.parse import quote_plus
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QEvent, Qt
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QDockWidget, QTreeWidget,
                              QTreeWidgetItem, QWidget, QVBoxLayout)
 
@@ -40,6 +40,9 @@ class MainWindow(QMainWindow):
 
         self.outline = QTreeWidget(self)
         self.outline.setHeaderHidden(True)
+        self.outline.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.outline.installEventFilter(self)
+        self._outline_flat: list[QTreeWidgetItem] = []
         self.outline.itemActivated.connect(self._outline_activated)
         self.outline.itemClicked.connect(self._outline_activated)
         self.dock = QDockWidget("Outline", self)
@@ -83,10 +86,13 @@ class MainWindow(QMainWindow):
     # ── outline ───────────────────────────────────────────────────────────
     def _reload_outline(self):
         self.outline.clear()
+        self._outline_flat = []
         stack: list[tuple[int, QTreeWidgetItem]] = []
-        for row, title, _page, level in self.view.outline():
+        for row, title, page, level in self.view.outline():
             item = QTreeWidgetItem([title])
             item.setData(0, Qt.ItemDataRole.UserRole, row)
+            item.setData(0, Qt.ItemDataRole.UserRole + 1, page)
+            self._outline_flat.append(item)
             while stack and stack[-1][0] >= level:
                 stack.pop()
             if stack:
@@ -99,11 +105,59 @@ class MainWindow(QMainWindow):
         row = item.data(0, Qt.ItemDataRole.UserRole)
         if row is not None:
             self.view.outline_goto(int(row))
+            # Back to the page: with the focus still in the tree the reader's next
+            # `j` would type-search the outline instead of scrolling the chapter.
+            self.view.setFocus()
 
     def _toggle_sidebar(self):
-        self.dock.setVisible(not self.dock.isVisible())
-        if self.dock.isVisible():
+        """Reveal the outline, put the keyboard in it, or hide it.
+
+        `t` used to flip visibility and leave the focus in the view, so the tree was
+        mouse-only. Now a visible-but-unfocused outline is re-entered rather than
+        hidden, and Escape (see `eventFilter`) is the way out.
+        """
+        if not self.dock.isVisible():
+            self.dock.show()
             self._reload_outline()
+            self._focus_outline()
+        elif not self.outline.hasFocus():
+            self._focus_outline()
+        else:
+            self.dock.hide()
+            self.view.setFocus()
+
+    def _focus_outline(self):
+        """Put the keyboard in the outline, on the entry for the page being read.
+
+        Revealing the dock and leaving the focus in the view made the outline
+        mouse-only: arrow keys went to the page and `itemActivated` was unreachable.
+        """
+        self._select_outline_page(self.view.current_page())
+        self.outline.setFocus()
+
+    def _select_outline_page(self, page):
+        """Select the last entry whose page is at or before `page`, like a bookmark list."""
+        best = None
+        for item in self._outline_flat:
+            target = item.data(0, Qt.ItemDataRole.UserRole + 1)
+            if target is None:
+                continue
+            if int(target) <= page:
+                best = item
+            else:
+                break
+        if best is not None:
+            self.outline.setCurrentItem(best)
+            self.outline.scrollToItem(best)
+
+    def eventFilter(self, obj, event):
+        """Escape leaves the outline; without it the keyboard has no way back."""
+        if obj is self.outline and event.type() == QEvent.Type.KeyPress \
+                and event.key() == Qt.Key.Key_Escape:
+            self.dock.hide()
+            self.view.setFocus()
+            return True
+        return super().eventFilter(obj, event)
 
     # ── prompts ───────────────────────────────────────────────────────────
     def _prompt(self, kind):

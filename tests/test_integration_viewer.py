@@ -202,6 +202,83 @@ class ViewerCase(unittest.TestCase):
         self._click(internal.center())
         self.assertEqual(self.view.current_page(), 1)
 
+    # ── destinations: land on the mark, not on the page top ───────────────
+    def _load_destinations(self):
+        """A document whose destinations name a point, in a window shorter than a page."""
+        self.window.resize(900, 380)
+        path = fixtures.write(self.tmp / "dest.pdf", fixtures.destination_points_pdf())
+        self.view.load(path)
+        self.view.goto_page(0)
+        self.pump()
+        return path
+
+    def _assert_landed_on(self, page, point):
+        target = self.view._point_scene(page, point)
+        self.assertIsNotNone(target, "destination must map onto the scene")
+        viewport = self.view._viewport_rect()
+        self.assertTrue(viewport.contains(target),
+                        f"destination {target} left the window {viewport}")
+        page_rect = self.view._positions[page]
+        if page_rect.bottom() - target.y() >= viewport.height():
+            self.assertLess(target.y() - viewport.top(), 0.25 * viewport.height(),
+                            "with room below the mark the destination belongs near "
+                            "the top of the window, not in its middle")
+
+    def test_internal_link_lands_on_its_destination_point(self):
+        # `/Fit` names a page only, so a viewer that drops the y coordinate still looks
+        # right with it; the fixture's `/XYZ` names a spot 200 pt down, which centring
+        # the page pushes out of a window shorter than the page.
+        self._load_destinations()
+        entries = self.view._link_entries(0)
+        self.assertEqual(len(entries), 1)
+        link, box = entries[0]
+        self.assertGreater(link.location().y(), 0, "fixture should name a point")
+        self._click(box.center())
+        self.pump()
+        self.assertEqual(self.view.current_page(), 1)
+        self._assert_landed_on(1, link.location())
+
+    def test_outline_goto_lands_on_the_bookmark_point(self):
+        self._load_destinations()
+        page, location = self.view.outline_destination(0)
+        self.assertEqual(page, 1)
+        self.assertIsNotNone(location)
+        self.assertGreater(location.y(), 0, "fixture bookmark should name a point")
+        self.view.outline_goto(0)
+        self.pump()
+        self.assertEqual(self.view.current_page(), 1)
+        self._assert_landed_on(1, location)
+
+    # ── the outline sidebar from the keyboard ─────────────────────────────
+    def test_sidebar_takes_the_keyboard_and_escape_returns_it(self):
+        from PyQt6.QtCore import Qt as QtCore
+        from PyQt6.QtTest import QTest
+        # Focus only moves inside an active window, on screen and offscreen alike.
+        self.window.activateWindow()
+        self.window.raise_()
+        self.pump()
+        self.assertFalse(self.window.dock.isVisible())
+        self.view.send_keys("t")
+        self.pump()
+        self.assertTrue(self.window.dock.isVisible(), "t must reveal the outline")
+        self.assertTrue(self.window.outline.hasFocus(),
+                        "revealing the outline must put the keyboard in it, "
+                        "otherwise the tree is mouse-only")
+        item = self.window.outline.currentItem()
+        self.assertIsNotNone(item, "the entry for the current page should be selected")
+        QTest.keyClick(self.window.outline, QtCore.Key.Key_Return)
+        self.pump()
+        self.assertEqual(self.view.current_page(), 1, "Return activates the entry")
+        self.assertFalse(self.window.outline.hasFocus(),
+                         "after a jump the keys belong to the page again")
+        self.view.send_keys("t")
+        self.pump()
+        self.assertTrue(self.window.outline.hasFocus())
+        QTest.keyClick(self.window.outline, QtCore.Key.Key_Escape)
+        self.pump()
+        self.assertFalse(self.window.dock.isVisible(), "Escape leaves the outline")
+        self.assertTrue(self.view.hasFocus())
+
     def test_mouse_click_off_a_link_does_nothing(self):
         self._load_links()
         opened = []

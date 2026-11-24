@@ -241,17 +241,31 @@ class PdfView(QGraphicsView):
     def _emit_page(self):
         self.pageChanged.emit(self._page, self.page_count())
 
-    def _center_on(self, index):
+    def _center_on(self, index, point=None):
+        """Show `index`, with `point` (PDF points, origin top-left) near the top.
+
+        Centring the page is only right when there is no destination point: a page
+        taller than the window then shows its middle, and a heading 50 points below
+        the page top ends up *above* the visible area — which is what made a bookmark
+        jump look like "it went to the page but not to the mark".
+        """
         rect = self._positions.get(index)
         if rect is not None:
-            self.centerOn(rect.center())
+            target = self._point_scene(index, point) if point is not None else None
+            if target is not None:
+                margin = min(60.0, self.viewport().height() * 0.12)
+                self.centerOn(target.x(),
+                              target.y() + self.viewport().height() / 2.0 - margin)
+            else:
+                self.centerOn(rect.center())
         self._render_visible()
 
     # ── navigation ────────────────────────────────────────────────────────
-    def goto_page(self, index):
+    def goto_page(self, index, point=None):
+        """Go to `index`; with `point`, land on that spot (PDF points, top-left origin)."""
         index = nav.clamp_page(index, self.page_count())
         self._page = index
-        self._center_on(index)
+        self._center_on(index, point)
         self._emit_page()
 
     def goto_label(self, label):
@@ -402,16 +416,41 @@ class PdfView(QGraphicsView):
         span = float(size.height()) if self._rotation % 180 else float(size.width())
         return rect.width() / span if span else 1.0
 
-    def _rotate_box(self, box, centre):
-        """Rotate a scene rectangle about `centre` by the view rotation, as a bounding box."""
+    def _rotate_point(self, point, centre):
+        """Rotate a scene point about `centre` by the view rotation."""
         angle = math.radians(self._rotation)
         cos_a, sin_a = math.cos(angle), math.sin(angle)
-        corners = []
-        for point in (box.topLeft(), box.topRight(), box.bottomRight(), box.bottomLeft()):
-            dx, dy = point.x() - centre.x(), point.y() - centre.y()
-            corners.append(QPointF(centre.x() + dx * cos_a - dy * sin_a,
-                                   centre.y() + dx * sin_a + dy * cos_a))
+        dx, dy = point.x() - centre.x(), point.y() - centre.y()
+        return QPointF(centre.x() + dx * cos_a - dy * sin_a,
+                       centre.y() + dx * sin_a + dy * cos_a)
+
+    def _rotate_box(self, box, centre):
+        """Rotate a scene rectangle about `centre` by the view rotation, as a bounding box."""
+        corners = [self._rotate_point(point, centre) for point in
+                   (box.topLeft(), box.topRight(), box.bottomRight(), box.bottomLeft())]
         return QPolygonF(corners).boundingRect()
+
+    def _point_scene(self, index, point):
+        """Map a destination point (PDF points, origin top-left) onto the scene.
+
+        Same two corrections as :meth:`_link_scene_rect` — the point scale, and the
+        rotation about the page centre — because a destination is only a degenerate
+        rectangle. Without them a bookmark lands correctly at 100 % / 0° and drifts
+        off the mark everywhere else.
+        """
+        rect = self._positions.get(index)
+        if rect is None or point is None:
+            return None
+        if not (math.isfinite(point.x()) and math.isfinite(point.y())):
+            return None
+        scale = self._point_scale(index)
+        size = self.doc.pagePointSize(index)
+        left = rect.center().x() - float(size.width()) * scale / 2.0
+        top = rect.center().y() - float(size.height()) * scale / 2.0
+        scene = QPointF(left + float(point.x()) * scale, top + float(point.y()) * scale)
+        if not self._rotation % 360:
+            return scene
+        return self._rotate_point(scene, rect.center())
 
     def _link_scene_rect(self, index, area):
         """Map a link area (PDF points, origin top-left) onto the scene."""
@@ -468,7 +507,7 @@ class PdfView(QGraphicsView):
             return
         page = int(link.page())
         if page >= 0:
-            self.goto_page(page)
+            self.goto_page(page, link.location())
 
     def _link_at(self, pos):
         """The link annotation under a scene point, or None."""
@@ -649,18 +688,33 @@ class PdfView(QGraphicsView):
         walk(QModelIndex(), 0)
         return out
 
+    def outline_destination(self, row):
+        """(page, location) for outline entry `row`; location is None when unset.
+
+        QtPdf pages and locations are both 0-based / top-left, so a caller can hand
+        them straight to :meth:`goto_page` — jumping to the page alone loses the
+        heading when the page is taller than the window.
+        """
+        if not self._outline_indexes:
+            self.outline()
+        if not 0 <= row < len(self._outline_indexes):
+            return (-1, None)
+        index = self._outline_indexes[row]
+        page = self.bookmarks.data(index, QPdfBookmarkModel.Role.Page.value)
+        location = self.bookmarks.data(index, QPdfBookmarkModel.Role.Location.value)
+        return (int(page) if page is not None else -1, location)
+
     def outline_goto(self, row):
         if not self._outline_indexes:
             self.outline()
         if not 0 <= row < len(self._outline_indexes):
             self.messageRaised.emit("no such outline entry", "error")
             return
-        index = self._outline_indexes[row]
-        page = self.bookmarks.data(index, QPdfBookmarkModel.Role.Page.value)
-        if page is None:
+        page, location = self.outline_destination(row)
+        if page < 0:
             self.messageRaised.emit("bookmark has no destination", "error")
             return
-        self.goto_page(int(page))
+        self.goto_page(page, location)
 
     def toggle_sidebar(self):
         self.sidebarToggled.emit()
