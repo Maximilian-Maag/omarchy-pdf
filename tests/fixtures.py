@@ -59,6 +59,28 @@ def text_pdf() -> bytes:
     })
 
 
+def mixed_links_pdf() -> bytes:
+    """Two pages; page 1 carries one external URI and one internal destination.
+
+    `f` has to offer both — the internal one jumps within the document — while `F`
+    ("open in the browser") has nothing to offer on the internal one. Without that
+    split the two keys do exactly the same thing.
+    """
+    return build({
+        1: b"<< /Type /Catalog /Pages 2 0 R >>",
+        2: b"<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>",
+        3: _page(2, 4, b" /Annots [11 0 R 12 0 R]"),
+        4: _stream(b"Page one"),
+        5: _page(2, 6),
+        6: _stream(b"Page two"),
+        9: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        11: (b"<< /Type /Annot /Subtype /Link /Rect [72 690 300 730] "
+             b"/Border [0 0 1] /A << /S /URI /URI (https://omarchy.org/) >> >>"),
+        12: (b"<< /Type /Annot /Subtype /Link /Rect [72 600 300 640] "
+             b"/Border [0 0 1] /A << /S /GoTo /D [5 0 R /Fit] >> >>"),
+    })
+
+
 def form_pdf() -> bytes:
     """One page with a text field and a checkbox."""
     return build({
