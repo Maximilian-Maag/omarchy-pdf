@@ -613,6 +613,16 @@ class PdfView(QGraphicsView):
             subprocess.Popen(["xdg-open", url])
         self.messageRaised.emit(f"opened {url}", "info")
 
+    def quit(self):
+        """Close the window this view is shown in.
+
+        `quit` is a command-layer verb (`q`, `:quit`), not a QWidget one, so the view has
+        to provide it: without it commands.h_quit raised AttributeError from inside
+        keyPressEvent, which PyQt6 escalates to qFatal() — pressing q aborted the process
+        instead of closing it.
+        """
+        self.window().close()
+
     # ── document operations ───────────────────────────────────────────────
     def _emit_doc(self, builder, args):
         text = builder(self.path(), *args) if args else builder(self.path())
