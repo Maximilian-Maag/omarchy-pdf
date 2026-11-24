@@ -5,6 +5,26 @@ All notable changes to omarchy-pdf are documented here.
 ## [Unreleased]
 
 ### Fixed
+- **`f` showed no hints on a page whose links sat on the sheet above it.** Targets were
+  collected from `_page` — the page nearest the viewport centre — so on a fit-page spread
+  (or a document whose links end on the neighbouring sheet) pressing `f` reported "0 hints"
+  with the links plainly on screen. Every page intersecting the viewport is hinted now, the
+  current one first, and only the link boxes that are actually inside it — so a page taller
+  than the window no longer counts links below the fold.
+- **Hint labels could be painted under the page.** Page pixmaps go into the scene at z 0 and
+  are removed and re-inserted on every layout rebuild (`+ - zw zp`, `r R`), so an overlay at
+  the same z ended up *below* the pages after a re-render: mode still `hint`, the labels
+  still matched keys, nothing visible. Overlay chrome now carries `OVERLAY_Z`, so it stays
+  above the paper — search highlights included.
+- **Hint labels were 11 pt whatever the zoom.** They are placed in scene units, next to page
+  text that a magnified reading session has scaled to 200–300 %, so a label was a few
+  pixels wide and read as "the hints never appear". The font now follows the zoom, and each
+  label is centred on its link on an accent plate, so it stays legible over a coloured page
+  area as well as over text.
+- **`f` on a page with nothing to hint entered a mode that ate the next keystroke.** Opening
+  hint mode with zero targets left an empty page, and the next key was consumed as a bad
+  label ("no such hint") — a scroll that silently did not happen. It now reports "no links
+  in view" and stays in normal mode.
 - **Pressing `q` aborted the whole viewer instead of closing it.** `h_quit` called
   `view.quit()`, a method `PdfView` never had; the `AttributeError` was raised inside the
   reimplemented `keyPressEvent`, where PyQt6 escalates an unhandled exception to `qFatal()`

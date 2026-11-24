@@ -159,6 +159,27 @@ lands beside it. Enforced by
 `tests/test_integration_viewer.py::test_hint_labels_scale_with_zoom` and
 `::test_link_boxes_follow_the_rotation`.
 
+Hints are page-scoped and *view*-scoped, in that order of history:
+
+- **Every page in view, not just the current one.** `_page` is "the sheet nearest the
+  viewport centre" (`_update_current_page`), which on a spread is not the sheet the reader
+  is looking at; collecting hints from it alone reported "0 hints" with the links plainly
+  on screen.
+- **Chrome owns a z above the pages.** Page pixmaps are inserted at z 0 and re-inserted on
+  every layout rebuild (zoom, rotate), so an overlay at the same z is painted *under* them
+  after the next re-render: mode still `hint`, labels still matched, nothing visible.
+  `OVERLAY_Z` and `OVERLAY_KIND` (an item data key naming `hint-plate`/`hint-label`/
+  `search-hit`) keep the chrome on top and let the suite identify it without importing a
+  Qt class.
+- **A label only goes where it can be read.** Targets are the link boxes intersecting the
+  viewport (the pages in view are only the candidate set), and a plate is clamped inwards so
+  one centred on a link at the window edge is not drawn half outside it.
+- **The label follows the page scale.** A fixed point size is a few pixels beside page text
+  at a 200–300 % reading zoom; that is what "the hints never appear" looks like. The font
+  and the accent plate behind it scale with `_hint_scale()`, and `f` on a page with nothing
+  to hint says so and stays in normal mode instead of eating the next keypress as a bad
+  label.
+
 ## 5. Keymap
 
 Modes: `normal`, `command` (the `:` line), `search` (the `/` line), `hint`, `visual`.
