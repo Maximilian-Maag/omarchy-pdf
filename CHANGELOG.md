@@ -5,6 +5,12 @@ All notable changes to omarchy-pdf are documented here.
 ## [Unreleased]
 
 ### Fixed
+- **Pressing `q` aborted the whole viewer instead of closing it.** `h_quit` called
+  `view.quit()`, a method `PdfView` never had; the `AttributeError` was raised inside the
+  reimplemented `keyPressEvent`, where PyQt6 escalates an unhandled exception to `qFatal()`
+  — so `q` and `<C-q>` dumped core with SIGABRT from 2.0.0 onwards. The view now closes its
+  window, and the integration suite drives the real key rather than the fake view that had
+  a `quit()` the real one lacked.
 - **Clicking a link in a PDF did nothing.** `pdf/view.py` had no mouse handling at all, so
   a click on a link annotation was swallowed by `QGraphicsView` and a perfectly healthy
   link read as broken — the keyboard hint (`f` + label) was the only way in, and nothing

@@ -289,6 +289,34 @@ class ViewerCase(unittest.TestCase):
         self.pump(until=lambda: not self.view._search_pending)
         self.assertEqual(self.view.current_page(), 2)
 
+    # ── window ────────────────────────────────────────────────────────────
+    def test_quit_command_closes_the_window(self):
+        self.window.show()
+        self.pump()
+        self.assertTrue(self.window.isVisible())
+        self.view.run_command("quit")
+        self.assertFalse(self.window.isVisible())
+
+    def test_quit_key_closes_the_window(self):
+        """`q` must close the window instead of aborting the process.
+
+        commands.h_quit calls view.quit(), which PdfView did not implement; the
+        AttributeError was raised inside keyPressEvent, and PyQt6 escalates an unhandled
+        exception in a reimplemented virtual to qFatal() — so pressing q dumped core.
+        Driving the real key is the point of this test: calling run_command() directly
+        would raise an ordinary traceback and never take that path.
+        """
+        from PyQt6.QtCore import QEvent, Qt
+        from PyQt6.QtGui import QKeyEvent
+        self.window.show()
+        self.pump()
+        self.assertTrue(self.window.isVisible())
+        event = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Q,
+                          Qt.KeyboardModifier.NoModifier, "q")
+        self.qapp.sendEvent(self.view, event)
+        self.pump()
+        self.assertFalse(self.window.isVisible())
+
     # ── marks ─────────────────────────────────────────────────────────────
     def test_marks(self):
         self.view.run_command("goto 2")
