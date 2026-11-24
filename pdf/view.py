@@ -33,6 +33,16 @@ _PLAIN_TOKENS = {
     Qt.Key.Key_Backspace: "<BS>", Qt.Key.Key_Space: "<Space>", Qt.Key.Key_Tab: "<Tab>",
 }
 
+# Overlay chrome (hint plates, search highlights) is added to the same scene as the page
+# pixmaps, which sit at z 0. Without a z of its own an overlay is painted UNDER every
+# page inserted after it — a zoom or rotate removes and re-adds the pages, so a hint set
+# opened before it stayed "live" but invisible.
+OVERLAY_Z = 1.0
+# QGraphicsItem data key naming what an overlay item is ("hint-label", "hint-plate",
+# "search-hit"): tests and any future chrome can tell them apart without importing a
+# concrete Qt class.
+OVERLAY_KIND = 0
+
 
 def key_token(event) -> str | None:
     """Map a QKeyEvent to a keymap token, or None when it carries no key."""
@@ -369,6 +379,8 @@ class PdfView(QGraphicsView):
             item = QGraphicsRectItem(box)
             item.setPen(QPen(color, 1))
             item.setBrush(QBrush(QColor(color.red(), color.green(), color.blue(), 60)))
+            item.setZValue(OVERLAY_Z)
+            item.setData(OVERLAY_KIND, "search-hit")
             self._scene.addItem(item)
             self._overlay.append(item)
         self._render_visible()
@@ -470,26 +482,101 @@ class PdfView(QGraphicsView):
         return None
 
     # ── hints ─────────────────────────────────────────────────────────────
+    def _viewport_rect(self):
+        """The visible part of the scene, or None before the widget has a layout.
+
+        A view that has been resized but never shown still reports a degenerate
+        viewport; treating that as "nothing is visible" would hide every hint.
+        """
+        rect = self.viewport().rect()
+        if rect.width() < 1 or rect.height() < 1:
+            return None
+        return self.mapToScene(rect).boundingRect()
+
+    def _visible_pages(self, viewport):
+        """Pages intersecting the viewport, the current sheet first.
+
+        Hints used to be collected from `self._page` alone, so on a fit-page spread (or
+        a document whose links sit on the neighbouring sheet) `f` reported nothing while
+        the links were plainly on screen. `_update_current_page` picks the page nearest
+        the viewport centre, which is not the same as "what is visible".
+        """
+        area = viewport if viewport is not None else self._scene.sceneRect()
+        pages = [i for i, rect in self._positions.items()
+                 if rect is not None and rect.intersects(area)]
+        pages.sort(key=lambda i: (i != self._page, i))
+        return pages
+
+    def _hint_scale(self):
+        """Scene units per PDF point — the hint chrome has to follow the zoom.
+
+        A fixed 11 pt label is a few pixels next to page text at 300 %, which is the
+        zoom a magnified reading session uses; that read as "the hints never appear".
+        """
+        return max(self._scale(), 1.0)
+
+    def _hint_font(self):
+        font = QFont()
+        font.setBold(True)
+        font.setPixelSize(max(12, int(round(11 * self._hint_scale()))))
+        return font
+
     def open_hints(self, kind="follow"):
         self._clear_hints()
         if not self.page_count():
             return
         self._hint_kind = kind
-        targets = self._link_entries(self._page, kind)
+        viewport = self._viewport_rect()
+        targets = []
+        for index in self._visible_pages(viewport):
+            for link, box in self._link_entries(index, kind):
+                # A label has to land where the reader can see it: a page can be taller
+                # than the window, and hinting a box below the fold puts the label off
+                # screen while inflating the "N hints" count.
+                if box is None or (viewport is not None and not box.intersects(viewport)):
+                    continue
+                targets.append((link, box))
+        if not targets:
+            # Entering hint mode with nothing to point at leaves a mode that eats the
+            # next keystroke ("no such hint") and shows an empty page: say why instead.
+            self.messageRaised.emit(
+                "no external links in view" if kind == "open"
+                else "no links in view", "error")
+            return
         self._hint_targets = targets
         self._hint_labels = hints_mod.generate_labels(len(targets))
         self._hint_typed = ""
-        color = QColor(self.palette_dict.get("accent", "#89b4fa"))
-        font = QFont()
-        font.setBold(True)
-        font.setPointSize(11)
+        accent = QColor(self.palette_dict.get("accent", "#89b4fa"))
+        ink = QColor(self.palette_dict.get("bg_darker", "#101019"))
+        font = self._hint_font()
+        margin = max(2.0, font.pixelSize() * 0.25)
         for label, (_link, box) in zip(self._hint_labels, targets):
-            item = QGraphicsSimpleTextItem(label)
-            item.setBrush(QBrush(color))
-            item.setFont(font)
-            item.setPos(box.center())
-            self._scene.addItem(item)
-            self._overlay.append(item)
+            text = QGraphicsSimpleTextItem(label)
+            text.setBrush(QBrush(ink))
+            text.setFont(font)
+            pad = text.boundingRect()
+            # Centre the label on the link and back it with an accent plate: a bare
+            # letter in the theme colour disappears over a coloured page area.
+            plate = QGraphicsRectItem(QRectF(0, 0, pad.width() + 2 * margin,
+                                            pad.height() + 2 * margin))
+            plate.setPen(QPen(accent, 0))
+            plate.setBrush(QBrush(accent))
+            plate_w, plate_h = pad.width() + 2 * margin, pad.height() + 2 * margin
+            origin = QPointF(box.center().x() - plate_w / 2,
+                             box.center().y() - plate_h / 2)
+            # A link on the edge of the viewport would put half its plate outside it.
+            if viewport is not None and plate_w <= viewport.width() and plate_h <= viewport.height():
+                origin = QPointF(
+                    min(max(origin.x(), viewport.left()), viewport.right() - plate_w),
+                    min(max(origin.y(), viewport.top()), viewport.bottom() - plate_h))
+            plate.setPos(origin)
+            text.setPos(origin + QPointF(margin - pad.x(), margin - pad.y()))
+            plate.setData(OVERLAY_KIND, "hint-plate")
+            text.setData(OVERLAY_KIND, "hint-label")
+            for item in (plate, text):
+                item.setZValue(OVERLAY_Z)
+                self._scene.addItem(item)
+                self._overlay.append(item)
         self.set_mode("hint")
         self.messageRaised.emit(f"{len(targets)} hints", "info")
 

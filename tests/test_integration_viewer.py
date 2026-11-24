@@ -28,12 +28,12 @@ try:
     from PyQt6.QtWidgets import QApplication  # noqa: E402
     from PyQt6.QtCore import QRectF  # noqa: E402
     from PyQt6.QtPdf import QPdfLinkModel  # noqa: E402
-    from pdf import app as app_mod, theme  # noqa: E402
+    from pdf import app as app_mod, theme, view as view_mod  # noqa: E402
     PALETTE = dict(theme.DEFAULT_PALETTE)
     _QT_IMPORT_ERROR = None
 except ImportError as _exc:  # pragma: no cover - exercised only without PyQt6
     QApplication = None
-    app_mod = theme = None
+    app_mod = theme = view_mod = None
     PALETTE = {}
     _QT_IMPORT_ERROR = str(_exc)
 
@@ -53,6 +53,12 @@ class ViewerCase(unittest.TestCase):
         self.window = app_mod.MainWindow(path=self.pdf, palette=PALETTE)
         self.addCleanup(self.window.close)
         self.view = self.window.view
+        # Shown, even offscreen: a widget that was resized but never laid out reports a
+        # degenerate viewport, and hint targets are filtered against the visible area —
+        # so an unshown window would test a geometry the reader never sees.
+        self.window.resize(1000, 1300)
+        self.window.show()
+        self.pump()
 
     def pump(self, until=None, rounds: int = 400):
         """Run the event loop so the async search worker can deliver results."""
@@ -271,6 +277,103 @@ class ViewerCase(unittest.TestCase):
         self.view.hint_key(self.view._hint_labels[0])
         self.assertEqual(opened, ["https://omarchy.org/"])
         self.assertEqual(self.view.mode(), "normal")
+
+    def test_hints_survive_a_re_render(self):
+        # Page pixmaps are inserted into the same scene at z 0, so overlay chrome without
+        # a z of its own is painted UNDER any page added afterwards. A zoom (or rotate)
+        # removes and re-adds every page, which buried a live hint set: mode still
+        # "hint", the labels still matched, nothing on screen.
+        self._load_links()
+        self.view.run_command("hint-follow")
+        self.assertTrue(self.view._overlay)
+        self.view.zoom(set_pct=200)
+        self.assertEqual(self.view.mode(), "hint")
+        page_z = max(item.zValue() for item in self.view._pages.values())
+        for item in self.view._overlay:
+            self.assertGreater(item.zValue(), page_z,
+                               "every overlay item must paint above the pages")
+
+    def test_hint_labels_grow_with_the_zoom(self):
+        # A fixed point size is a few pixels next to page text at a reading zoom (fit
+        # width is 200-300 %, the magnification this reader uses), which looked exactly
+        # like hints that never appeared.
+        self._load_links()
+        self.view.run_command("hint-follow")
+        small = self.view._overlay[-1].font().pixelSize()
+        self.view.run_command("hint-clear")
+        self.view.zoom(set_pct=300)
+        self.view.run_command("top")     # at 300 % the page is taller than the window
+        self.view.run_command("hint-follow")
+        large = self.view._overlay[-1].font().pixelSize()
+        self.assertEqual(small, 12, "labels keep a readable floor at 100 %")
+        self.assertEqual(large, 33, "labels scale with the zoom")
+        self.assertGreater(large, small)
+
+    def test_hint_plate_is_centred_on_its_link(self):
+        external, _internal = self._load_links()
+        self.view.run_command("hint-follow")
+        plates = [item for item in self.view._overlay
+                  if item.data(view_mod.OVERLAY_KIND) == "hint-plate"]
+        self.assertEqual(len(plates), len(self.view._hint_labels))
+        nearest = min(plates,
+                      key=lambda item: abs(item.sceneBoundingRect().center().y()
+                                           - external.center().y()))
+        centre = nearest.sceneBoundingRect().center()
+        self.assertAlmostEqual(centre.x(), external.center().x(), delta=1.0)
+        self.assertAlmostEqual(centre.y(), external.center().y(), delta=1.0)
+
+    def test_hint_on_a_page_without_links_says_so(self):
+        # Entering hint mode with nothing to point at used to show an empty page and eat
+        # the next keystroke as a bad label ("no such hint").
+        self.view.resize(500, 400)
+        self.view.goto_page(1)
+        self.pump()
+        messages = []
+        self.view.messageRaised.connect(lambda text, level="info": messages.append((level, text)))
+        self.view.run_command("hint-follow")
+        self.assertEqual(self.view.mode(), "normal")
+        self.assertFalse(self.view._overlay)
+        self.assertEqual(messages, [("error", "no links in view")])
+
+    def test_hints_cover_the_visible_neighbouring_page(self):
+        # Hints were collected from the current page only, so on a spread (or when the
+        # links sit on the sheet above) `f` said "0 hints" with the links on screen.
+        self._load_links()
+        self.view.run_command("zoom-set 60")     # both sheets on screen, links included
+        self.view.goto_page(1)          # a page with no links of its own
+        self.pump()
+        self.assertEqual(self.view.current_page(), 1)
+        self.view.run_command("hint-follow")
+        self.assertEqual(self.view.mode(), "hint")
+        self.assertEqual(len(self.view._hint_labels), 2)
+
+    def test_hints_only_cover_links_in_view(self):
+        # A label has to land where the reader can see it: a page can be taller than the
+        # window, and hinting a box below the fold draws off screen.
+        self._load_links()
+        self.window.resize(900, 300)
+        self.pump()
+        self.view.goto_page(0)
+        self.pump()
+        messages = []
+        self.view.messageRaised.connect(lambda text, level="info": messages.append((text, level)))
+        self.view.run_command("hint-follow")
+        self.assertEqual(self.view.mode(), "normal")
+        self.assertFalse(self.view._overlay)
+        self.assertEqual(messages[-1], ("no links in view", "error"))
+
+    def test_hint_plates_stay_inside_the_viewport(self):
+        # Centred on the link, but never half outside the window: a plate at the edge is
+        # clamped inwards.
+        self._load_links()
+        self.view.run_command("hint-follow")
+        viewport = self.view.mapToScene(self.view.viewport().rect()).boundingRect()
+        plates = [item for item in self.view._overlay
+                  if item.data(view_mod.OVERLAY_KIND) == "hint-plate"]
+        self.assertTrue(plates)
+        for plate in plates:
+            self.assertTrue(viewport.contains(plate.sceneBoundingRect()),
+                            f"plate {plate.sceneBoundingRect()} escapes {viewport}")
 
     # ── prompts ───────────────────────────────────────────────────────────
     def test_command_prompt_sets_mode(self):
