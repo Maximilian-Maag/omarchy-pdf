@@ -40,6 +40,32 @@ def _stream(text: bytes) -> bytes:
     return b"<< /Length %d >>\nstream\n" % len(body) + body + b"\nendstream"
 
 
+def nested_outline_pdf() -> bytes:
+    """Three pages, one chapter with two sections under it.
+
+    The hierarchy is the point: a section is reachable only after its chapter is opened,
+    which is what the panel's Right/Left keys have to do.
+    """
+    return build({
+        1: b"<< /Type /Catalog /Pages 2 0 R /Outlines 10 0 R >>",
+        2: b"<< /Type /Pages /Kids [3 0 R 5 0 R 7 0 R] /Count 3 >>",
+        3: _page(2, 4),
+        4: _stream(b"Chapter one"),
+        5: _page(2, 6),
+        6: _stream(b"Section a"),
+        7: _page(2, 8),
+        8: _stream(b"Section b"),
+        9: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        10: b"<< /Type /Outlines /First 12 0 R /Last 12 0 R /Count 3 >>",
+        12: (b"<< /Title (Chapter One) /Parent 10 0 R /First 13 0 R /Last 14 0 R "
+             b"/Count 2 /Dest [3 0 R /Fit] >>"),
+        13: (b"<< /Title (Section A) /Parent 12 0 R /Next 14 0 R "
+             b"/Dest [5 0 R /Fit] >>"),
+        14: (b"<< /Title (Section B) /Parent 12 0 R /Prev 13 0 R "
+             b"/Dest [7 0 R /Fit] >>"),
+    })
+
+
 def text_pdf() -> bytes:
     """Three pages, an external link on page 1, one outline entry to page 2."""
     return build({

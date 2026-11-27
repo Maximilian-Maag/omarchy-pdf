@@ -288,12 +288,16 @@ class ViewerCase(unittest.TestCase):
         kinds = {target[0] for target in self.view._hint_targets}
         self.assertEqual(kinds, {"link"})
 
-    def test_hint_panel_lists_the_outline(self):
-        # Painted labels cannot help when a hint has no box on the page (every outline
-        # entry) or the box is outside the visible part of a big page: the panel is the
-        # readable copy, and it keeps the chapter/sub-chapter shape.
-        self.view.goto_page(2)
+    def test_hints_paint_on_the_page_and_open_no_panel(self):
+        # `f` is for the page: a panel over it would cover the very letters it describes.
+        self._load_links()
         self.view.run_command("hint-follow")
+        self.assertEqual(self.view.mode(), "hint")
+        self.assertTrue(self.view._hint_labels)
+        self.assertIsNone(self.view._legend)
+
+    def test_places_lists_the_outline_hierarchically(self):
+        self.view.run_command("places")
         panel = self.view._legend
         self.assertIsNotNone(panel)
         self.assertTrue(panel.isVisible())
@@ -302,10 +306,10 @@ class ViewerCase(unittest.TestCase):
         self.assertIn("Second page", first.text(0))
         self.assertIn("S.2", first.text(0))
         self.assertEqual(first.data(0, Qt.ItemDataRole.UserRole)[0], "outline")
+        self.assertEqual(self.view.mode(), "normal")
 
-    def test_hint_panel_is_centred_and_reads_larger_than_the_page(self):
-        self.view.goto_page(2)
-        self.view.run_command("hint-follow")
+    def test_places_panel_is_centred_and_reads_larger_than_the_page(self):
+        self.view.run_command("places")
         panel = self.view._legend
         area = self.view.viewport().rect()
         centre_panel = panel.geometry().center()
@@ -316,47 +320,70 @@ class ViewerCase(unittest.TestCase):
         self.assertGreaterEqual(panel.width(), 320)
         self.assertLessEqual(panel.width(), area.width())
 
-    def test_hint_panel_lists_links_flat(self):
-        self._load_links()
-        self.view.run_command("hint-follow")
+    def test_places_panel_keeps_the_sections_under_their_chapter(self):
+        path = fixtures.write("/tmp/omarchy-pdf-nested.pdf", fixtures.nested_outline_pdf())
+        self.view.load(path)
+        self.view.run_command("places")
         panel = self.view._legend
-        self.assertIn("omarchy.org", panel.topLevelItem(0).text(0))
-        self.assertEqual(panel.topLevelItemCount(), len(self.view._hint_labels))
-        self.assertEqual(panel.topLevelItem(0).childCount(), 0)
+        self.assertEqual(panel.topLevelItemCount(), 1)
+        chapter = panel.topLevelItem(0)
+        self.assertIn("Chapter One", chapter.text(0))
+        self.assertEqual(chapter.childCount(), 2)
+        self.assertIn("Section A", chapter.child(0).text(0))
+        self.assertIn("S.2", chapter.child(0).text(0))
 
-    def test_return_on_a_panel_row_jumps_there(self):
-        self.view.goto_page(2)
-        self.view.run_command("hint-follow")
+    def test_places_panel_grows_when_a_chapter_opens(self):
+        path = fixtures.write("/tmp/omarchy-pdf-nested2.pdf", fixtures.nested_outline_pdf())
+        self.view.load(path)
+        self.view.run_command("places")
+        panel = self.view._legend
+        self.assertEqual(self.view._panel_rows(), 1)
+        chapter = panel.topLevelItem(0)
+        self.assertFalse(chapter.isExpanded())
+        chapter.setExpanded(True)
+        self.qapp.processEvents()
+        # Every visible row has to fit: the sections must not land behind a scrollbar the
+        # tree does not scroll with the arrow keys.
+        self.assertEqual(self.view._panel_rows(), 3)
+        row_height = max(18, self.view._panel_font().pixelSize()) + 16
+        self.assertGreaterEqual(panel.height(), 3 * row_height,
+                                "the opened sections must not land behind a scrollbar")
+
+    def test_places_without_an_outline_says_so(self):
+        path = fixtures.write("/tmp/omarchy-pdf-plain.pdf", fixtures.non_a4_pdf())
+        self.view.load(path)
+        said = []
+        self.view.messageRaised.connect(lambda text, level="info": said.append(text))
+        self.view.run_command("places")
+        self.assertIn("no outline in this document", said)
+        self.assertIsNone(self.view._legend)
+
+    def test_return_on_a_place_jumps_there(self):
+        self.view.goto_page(3)
+        self.view.run_command("places")
         self.view._panel_activated(self.view._legend.topLevelItem(0))
         self.assertEqual(self.view.current_page(), 1)
         self.assertEqual(self.view.mode(), "normal")
         self.assertFalse(self.view._legend.isVisible())
 
-    def test_a_letter_typed_in_the_panel_picks_its_hint(self):
-        # The panel holds the keyboard, so the letters have to reach the hint matcher
-        # through the event filter rather than through the view.
-        self.view.goto_page(2)
-        self.view.run_command("hint-follow")
-        self.assertTrue(self.view._legend.hasFocus())
+    def test_letters_do_not_start_hint_mode_from_the_places_panel(self):
+        # No hint letters are painted by `places`, so a letter must not switch the view
+        # into a mode that then eats the following keystrokes.
+        self.view.run_command("places")
         event = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_A,
-                          Qt.KeyboardModifier.NoModifier, self.view._hint_labels[0])
+                          Qt.KeyboardModifier.NoModifier, "a")
         self.qapp.sendEvent(self.view._legend, event)
         self.qapp.processEvents()
-        self.assertEqual(self.view.current_page(), 1)
+        self.assertEqual(self.view.mode(), "normal")
 
-    def test_hint_panel_is_hidden_after_the_hint_is_taken(self):
-        self.view.goto_page(2)
-        self.view.run_command("hint-follow")
-        self.view.send_keys(self.view._hint_labels[0])
+    def test_escape_closes_the_places_panel(self):
+        self.view.run_command("places")
+        event = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape,
+                          Qt.KeyboardModifier.NoModifier)
+        self.qapp.sendEvent(self.view._legend, event)
+        self.qapp.processEvents()
         self.assertFalse(self.view._legend.isVisible())
 
-    def test_hint_panel_is_hidden_when_hint_mode_is_left(self):
-        self.view.goto_page(2)
-        self.view.run_command("hint-follow")
-        self.view.send_keys("<Esc>")
-        self.assertFalse(self.view._legend.isVisible())
-
-    # ── destinations: land on the mark, not on the page top ───────────────
     def _load_destinations(self):
         """A document whose destinations name a point, in a window shorter than a page."""
         self.window.resize(900, 380)

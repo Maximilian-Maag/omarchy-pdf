@@ -102,9 +102,12 @@ DEFAULT_BINDS: dict[str, dict[str, str]] = {
         "?": "search-prev-prompt",
         "n": "search-next",
         "N": "search-prev",
-        # hints (follow links / annotations)
+        # hints (follow links / annotations) - the labels go on the page
         "f": "hint-follow",
         "F": "hint-open",
+        # the destinations as a panel you can walk. NOT "l"/"L": those are the vim motions
+        # (scroll-right / bottom), and the panel must not cover the letters `f` paints.
+        "T": "places",
         # navigation history
         "<C-o>": "history-back",
         "<C-i>": "history-forward",

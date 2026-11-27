@@ -701,14 +701,29 @@ class PdfView(QGraphicsView):
                 self._scene.addItem(item)
                 self._overlay.append(item)
         self.set_mode("hint")
-        # Labels painted on the page are useless on their own: a hint may have no box at
-        # all (outline entries), the boxes can sit outside the visible part of a big page,
-        # and a magnified reader cannot survey a whole sheet. The panel names every hint,
-        # in window coordinates, so it is readable whatever the zoom and wherever the page
-        # has scrolled to.
-        self._show_hint_panel(targets)
+        # The labels are on the page, which is where a reader who can see the page looks.
+        # The navigable list of destinations is a separate key (`L`, `:places`) so that it
+        # can never cover the very letters it would be describing.
         self.messageRaised.emit(
             hints_mod.describe(self._hint_labels, [t[3] for t in targets]), "info")
+
+    def open_places(self):
+        """The document structure as a panel: walk it with the arrows, Return to jump.
+
+        Not hint mode: there are no letters to type here, only destinations to choose
+        from, so the panel keeps the keyboard for the tree itself.
+        """
+        if self._mode == "hint":
+            self._clear_hints()
+            self.set_mode("normal")
+        outline = [(row, title, page, level) for row, title, page, level in self.outline()
+                   if page is not None and page >= 0]
+        if not outline:
+            self.messageRaised.emit("no outline in this document", "error")
+            return
+        self._show_places_panel(outline)
+        self.messageRaised.emit(
+            "%d places - up/down walk, right/left open, return jumps" % len(outline), "info")
 
     def hint_key(self, key):
         """Handle a character while in hint mode; returns True if consumed."""
@@ -801,35 +816,22 @@ class PdfView(QGraphicsView):
         font.setBold(False)
         return font
 
-    def _show_hint_panel(self, targets):
+    def _show_places_panel(self, outline):
         panel = self._hint_panel_widget()
         panel.clear()
         panel.setFont(self._panel_font())
-        if targets and targets[0][0] == "outline":
-            # Keep the chapter/sub-chapter shape: levels come from the outline itself.
-            # The hint letter is part of the row, because typing it still works and the
-            # status line advertises it.
-            labels = {payload: label for label, (_k, payload, _b, _d)
-                      in zip(self._hint_labels, targets)}
-            stack: list[tuple[int, QTreeWidgetItem]] = []
-            for row, title, page, level in self.outline():
-                if page is None or page < 0:
-                    continue
-                letter = labels.get(row, "")
-                item = QTreeWidgetItem([f"{letter}   {title}   (S.{int(page) + 1})"])
-                item.setData(0, Qt.ItemDataRole.UserRole, ("outline", row))
-                while stack and stack[-1][0] >= level:
-                    stack.pop()
-                if stack:
-                    stack[-1][1].addChild(item)
-                else:
-                    panel.addTopLevelItem(item)
-                stack.append((level, item))
-        else:
-            for label, target in zip(self._hint_labels, targets):
-                item = QTreeWidgetItem([f"{label}   {target[3]}"])
-                item.setData(0, Qt.ItemDataRole.UserRole, ("link", target[1]))
+        # Keep the chapter/sub-chapter shape: levels come from the outline itself.
+        stack: list[tuple[int, QTreeWidgetItem]] = []
+        for row, title, page, level in outline:
+            item = QTreeWidgetItem([f"{title}   (S.{int(page) + 1})"])
+            item.setData(0, Qt.ItemDataRole.UserRole, ("outline", row))
+            while stack and stack[-1][0] >= level:
+                stack.pop()
+            if stack:
+                stack[-1][1].addChild(item)
+            else:
                 panel.addTopLevelItem(item)
+            stack.append((level, item))
         self._place_hint_panel()
         panel.show()
         panel.raise_()
@@ -886,15 +888,16 @@ class PdfView(QGraphicsView):
             self._activate_link(payload, self._hint_kind)
 
     def eventFilter(self, obj, event):
-        """Letters pick a hint while the panel holds the keyboard."""
+        """Escape closes the panel; hint letters reach the matcher while hint mode runs."""
         if obj is self._legend and event.type() == event.Type.KeyPress:
             if event.key() == Qt.Key.Key_Escape:
+                self._hide_legend()
                 self._clear_hints()
                 self.set_mode("normal")
                 self.setFocus(Qt.FocusReason.OtherFocusReason)
                 return True
             text = event.text()
-            if text and text.isprintable() and len(text) == 1:
+            if (self._mode == "hint" and text and text.isprintable() and len(text) == 1):
                 self.hint_key(text)
                 return True
         return super().eventFilter(obj, event)

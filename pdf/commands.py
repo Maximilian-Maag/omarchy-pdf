@@ -183,6 +183,12 @@ def h_web_search_prompt(view, args):
     view.start_prompt("web-search")
 
 
+def h_places(view, args):
+    """The navigable panel: chapters, sub-chapters, Return to jump."""
+    _require(args, 0, "places")
+    view.open_places()
+
+
 def h_outline_toggle(view, args):
     _require(args, 0, "sidebar-toggle")
     view.toggle_sidebar()
@@ -261,7 +267,7 @@ def h_clear(view, args):
 
 def h_help(view, args):
     _require(args, 0, "help")
-    view.message("j/k scroll  gg/G top/end  /search  f hint  <C-n> page colour  :command  q quit")
+    view.message("j/k scroll  gg/G top/end  /search  f hints  T places  <C-n> colour  :command  q quit")
 
 
 def h_night(view, args):
@@ -328,6 +334,7 @@ _COMMANDS: list[Command] = [
     Command("hint-activate", h_hint_activate, "hint-activate <label>", minimum=1),
     Command("hint-clear", _mode_command("normal"), "leave hint mode"),
     Command("hint-backspace", h_hint_backspace, "delete a hint character"),
+    Command("places", h_places, "the document structure as a navigable panel"),
     # history
     Command("history-back", _history("back"), "history back"),
     Command("history-forward", _history("forward"), "history forward"),
@@ -422,6 +429,19 @@ def dispatch(view, line: str) -> Command | None:
 def complete(prefix: str) -> list[str]:
     """Command names beginning with `prefix`, sorted."""
     return sorted(name for name in _BY_NAME if name.startswith(prefix))
+
+
+def suggest(text: str, limit: int = 500) -> list[tuple[str, str]]:
+    """(name, help) pairs worth offering for what has been typed so far.
+
+    An empty or all-argument text offers everything: qutebrowser shows the list as soon
+    as the `:` is typed, which is how a reader finds out that a command exists at all.
+    The list scrolls rather than truncates - a name cut off by an arbitrary count is a
+    command the reader never learns about.
+    """
+    head = text.split(" ", 1)[0]
+    names = sorted(name for name in _BY_NAME if name.startswith(head))
+    return [(name, _BY_NAME[name].help) for name in names[:limit]]
 
 
 def command_names() -> list[str]:

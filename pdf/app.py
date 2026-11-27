@@ -196,12 +196,26 @@ class MainWindow(QMainWindow):
             self.outline.scrollToItem(best)
 
     def eventFilter(self, obj, event):
-        """Escape leaves the outline; without it the keyboard has no way back."""
-        if obj is self.outline and event.type() == QEvent.Type.KeyPress \
-                and event.key() == Qt.Key.Key_Escape:
-            self.dock.hide()
-            self.view.setFocus()
-            return True
+        """Keys typed while the outline has focus belong to the document.
+
+        Escape leaves the outline; without it the keyboard has no way back. Everything
+        printable goes back to the view as well, because a reader who opened the sidebar
+        and then pressed `f` (or `T`, or `:`) had every one of those keys eaten by the
+        tree's own type-search — which looks exactly like a broken keybinding.
+        """
+        if obj is self.outline and event.type() == QEvent.Type.KeyPress:
+            if event.key() == Qt.Key.Key_Escape:
+                self.dock.hide()
+                self.view.setFocus()
+                return True
+            text = event.text()
+            if (text and text.isprintable() and len(text) == 1
+                    and not (event.modifiers() & (Qt.KeyboardModifier.ControlModifier
+                                                  | Qt.KeyboardModifier.AltModifier
+                                                  | Qt.KeyboardModifier.MetaModifier))):
+                self.view.setFocus()
+                self.view.keyPressEvent(event)
+                return True
         return super().eventFilter(obj, event)
 
     # ── prompts ───────────────────────────────────────────────────────────
