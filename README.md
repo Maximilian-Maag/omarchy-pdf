@@ -24,7 +24,9 @@ the way qutebrowser owns its interaction over QtWebEngine.
 | `r` `R` | rotate 90° cw / ccw |
 | `<Ctrl-n>` | page colour: `off` → `invert` → yellow-on-black `contrast` (the same switch as `Super+Ctrl+N`) |
 | `/` `?` | search forward / backward (then `n` `N`) |
-| `f` `F` | **hint mode** — `f` labels every link in view (and, on a page with no links, the outline entries), `F` only the external ones; the destinations are also listed in the status line |
+| `f` `F` | **hint mode** — `f` labels every link in view (and, on a page with no links, the outline entries), `F` only the external ones; the set opens as a panel in the centre of the window, chapters nested with their sections |
+| `Up` `Down` `Right` `Left` | in that panel: walk the hints, open/close a chapter |
+| `Return` | in that panel: jump to the entry under the cursor |
 | *click* on a link | follow it (internal destination → jump, external URI → browser) |
 | `<Ctrl-o>` `<Ctrl-i>` | history back / forward |
 | `o` | open a document |

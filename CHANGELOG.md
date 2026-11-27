@@ -29,10 +29,12 @@ All notable changes to omarchy-pdf are documented here.
   `F` (external links only) keeps its strict meaning.
 - **Hint destinations were only ever shown as boxes on the page.** A magnified reader sees a
   fragment of the sheet, so the labels can be somewhere other than the visible area — and an
-  outline hint has no box to paint on at all. Hints now also get a panel in the top-left of
-  the window, one line per hint (`a  S.2 Second page`), in window coordinates so it neither
-  scrolls nor shrinks with the page zoom, plus the full set in the status line (`a→S.12`).
-  It disappears with the hint mode.
+  outline hint has no box to paint on at all. Hints now open a panel in the **centre** of the
+  window, in window coordinates so it neither scrolls nor shrinks with the page zoom, in type
+  larger than the window's own: one row per hint, chapters with their sub-sections nested
+  underneath. `Up`/`Down` walk it, `Right`/`Left` open and close a chapter, `Return` jumps to
+  the entry, a hint letter still picks that hint, `Esc` closes. The status line keeps the
+  compact list (`a→S.12  s→S.31`).
 - **"That key did nothing" feedback expired before it could be read.** Errors (no links, no
   outline, bad command) now stay on the status bar for ten seconds instead of five.
 - **The e2e suite skipped itself on exactly the hosts that need the QtPdf shim.** Its

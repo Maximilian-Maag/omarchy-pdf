@@ -16,7 +16,8 @@ import subprocess
 from PyQt6.QtCore import Qt, QSize, QRectF, QPointF, QTimer, QModelIndex, pyqtSignal
 from PyQt6.QtGui import (QPixmap, QImage, QPainter, QColor, QPen, QBrush, QFont, QPolygonF)
 from PyQt6.QtWidgets import (QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
-                             QGraphicsRectItem, QGraphicsSimpleTextItem, QApplication)
+                             QGraphicsRectItem, QGraphicsSimpleTextItem, QApplication,
+                             QTreeWidget, QTreeWidgetItem)
 from PyQt6.QtPdf import (QPdfDocument, QPdfSearchModel, QPdfLinkModel,
                          QPdfBookmarkModel, QPdfPageNavigator)
 
@@ -705,9 +706,7 @@ class PdfView(QGraphicsView):
         # and a magnified reader cannot survey a whole sheet. The panel names every hint,
         # in window coordinates, so it is readable whatever the zoom and wherever the page
         # has scrolled to.
-        self._show_legend([f"{label}  {target[3]}"
-                           for label, target in zip(self._hint_labels, targets)][:14],
-                          self.font().pixelSize())
+        self._show_hint_panel(targets)
         self.messageRaised.emit(
             hints_mod.describe(self._hint_labels, [t[3] for t in targets]), "info")
 
@@ -753,51 +752,152 @@ class PdfView(QGraphicsView):
         if self._mode == "hint":
             self._clear_overlay()
 
-    # ── hint legend ───────────────────────────────────────────────────────
-    def _legend_label(self):
-        """The legend is a child widget, i.e. it lives in window coordinates.
+    # ── hint panel ────────────────────────────────────────────────────────
+    def _hint_panel_widget(self):
+        """A navigable panel, centred, in window coordinates.
 
-        A hint that has no box on the page — an outline entry, which is every hint on a
-        prose page — has nowhere in the scene to put its label, and a scene item would
-        also scroll away under the reader. As a viewport child it stays where it was
-        put, keeps its own readable type size whatever the page zoom, and is text, which
-        is the only form this reader can survey.
+        A hint may have no box on the page at all (every outline entry), and where it has
+        one the box can sit outside the visible slice of a big page — so the set has to be
+        readable somewhere that neither scrolls nor shrinks with the page zoom. It is a
+        tree rather than a list because the destinations are a document structure: the
+        arrows walk it, Right/Left open and close a chapter, Return jumps.
         """
         if self._legend is None:
-            from PyQt6.QtWidgets import QLabel
-            self._legend = QLabel(self.viewport())
-            self._legend.setWordWrap(False)
-            self._legend.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-            # Hint mode is driven from the keyboard; the pointer must keep reaching the
-            # page (and the link under it) through the panel.
-            self._legend.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-            self._legend.setStyleSheet(
-                "QLabel { background:%s; color:%s; border:1px solid %s; padding:4px 8px; }"
+            panel = QTreeWidget(self.viewport())
+            panel.setHeaderHidden(True)
+            panel.setRootIsDecorated(True)
+            panel.setUniformRowHeights(True)
+            panel.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+            panel.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+            panel.setStyleSheet(
+                "QTreeWidget { background:%s; color:%s; border:2px solid %s;"
+                " padding:6px 10px; }"
+                "QTreeWidget::item { padding:2px 0; }"
+                "QTreeWidget::item:selected { background:%s; color:%s; }"
                 % (self.palette_dict.get("bg_dark", "#161622"),
                    self.palette_dict.get("fg", "#ffd700"),
-                   self.palette_dict.get("accent", "#89b4fa")))
+                   self.palette_dict.get("accent", "#89b4fa"),
+                   self.palette_dict.get("selection", "#45475a"),
+                   self.palette_dict.get("fg_light", "#bac2de")))
+            font = QFont()
+            # Typing a hint letter narrows the set instead of reaching the tree, so the
+            # panel needs its own keyboard filter; arrows and Return stay the tree's.
+            panel.installEventFilter(self)
+            panel.itemActivated.connect(self._panel_activated)
+            # A chapter opens in place; the panel has to grow with it or the new rows
+            # land behind a scrollbar the arrow keys do not scroll.
+            panel.itemExpanded.connect(lambda *_a: self._place_hint_panel())
+            panel.itemCollapsed.connect(lambda *_a: self._place_hint_panel())
+            self._legend = panel
         return self._legend
 
-    def _show_legend(self, lines, font_px):
-        label = self._legend_label()
-        label.setFont(self._legend_font(font_px))
-        label.setText("\n".join(lines))
-        label.adjustSize()
-        label.move(8, 8)
-        label.show()
-        label.raise_()
-
-    def _legend_font(self, pixel_size):
-        font = QFont()
-        font.setBold(False)
-        size = int(pixel_size)
+    def _panel_font(self):
+        """Larger than the window's own font: this is the menu the reader picks from."""
+        font = QFont(self.font())
+        size = font.pixelSize()
         if size <= 0:
-            # QFont.pixelSize() is -1 when the widget font is defined in points, which
-            # is the normal case on a desktop with a scaled font: measure it instead of
-            # falling back to a 12 px panel this reader could not read.
-            size = max(12, int(self.fontMetrics().height() * 1.1))
-        font.setPixelSize(max(12, size))
+            size = int(self.fontMetrics().height())
+        font.setPixelSize(max(18, int(size * 1.6)))
+        font.setBold(False)
         return font
+
+    def _show_hint_panel(self, targets):
+        panel = self._hint_panel_widget()
+        panel.clear()
+        panel.setFont(self._panel_font())
+        if targets and targets[0][0] == "outline":
+            # Keep the chapter/sub-chapter shape: levels come from the outline itself.
+            # The hint letter is part of the row, because typing it still works and the
+            # status line advertises it.
+            labels = {payload: label for label, (_k, payload, _b, _d)
+                      in zip(self._hint_labels, targets)}
+            stack: list[tuple[int, QTreeWidgetItem]] = []
+            for row, title, page, level in self.outline():
+                if page is None or page < 0:
+                    continue
+                letter = labels.get(row, "")
+                item = QTreeWidgetItem([f"{letter}   {title}   (S.{int(page) + 1})"])
+                item.setData(0, Qt.ItemDataRole.UserRole, ("outline", row))
+                while stack and stack[-1][0] >= level:
+                    stack.pop()
+                if stack:
+                    stack[-1][1].addChild(item)
+                else:
+                    panel.addTopLevelItem(item)
+                stack.append((level, item))
+        else:
+            for label, target in zip(self._hint_labels, targets):
+                item = QTreeWidgetItem([f"{label}   {target[3]}"])
+                item.setData(0, Qt.ItemDataRole.UserRole, ("link", target[1]))
+                panel.addTopLevelItem(item)
+        self._place_hint_panel()
+        panel.show()
+        panel.raise_()
+        panel.setFocus(Qt.FocusReason.OtherFocusReason)
+        if panel.topLevelItemCount():
+            panel.setCurrentItem(panel.topLevelItem(0))
+
+    def _panel_rows(self):
+        """Rows the reader can actually see: top-level ones plus what is expanded."""
+        panel = self._legend
+        if panel is None:
+            return 0
+
+        def count(item):
+            visible = 1
+            if item.isExpanded():
+                for i in range(item.childCount()):
+                    visible += count(item.child(i))
+            return visible
+
+        return sum(count(panel.topLevelItem(i)) for i in range(panel.topLevelItemCount()))
+
+    def _place_hint_panel(self):
+        """Centre the panel in the window, big enough to read, never past the edges.
+
+        The height follows the rows on screen instead of filling the window: a panel that
+        covers the whole page hides the very thing the reader is choosing a chapter in.
+        """
+        panel = self._legend
+        if panel is None:
+            return
+        area = self.viewport().rect()
+        width = max(320, min(int(area.width() * 0.8), int(area.width()) - 32))
+        row_height = max(18, self._panel_font().pixelSize()) + 16
+        rows = max(5, self._panel_rows())
+        wanted = rows * row_height + 28
+        height = max(160, min(wanted, int(area.height() * 0.7), int(area.height()) - 32))
+        panel.resize(width, height)
+        panel.move(area.x() + (area.width() - width) // 2,
+                   area.y() + (area.height() - height) // 2)
+
+    def _panel_activated(self, item, _column=0):
+        """Return on a row jumps there, exactly as typing its hint label would."""
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not data:
+            return
+        kind, payload = data
+        self._clear_hints()
+        self.set_mode("normal")
+        self.setFocus(Qt.FocusReason.OtherFocusReason)
+        if kind == "outline":
+            self.outline_goto(int(payload))
+        else:
+            self._activate_link(payload, self._hint_kind)
+
+    def eventFilter(self, obj, event):
+        """Letters pick a hint while the panel holds the keyboard."""
+        if obj is self._legend and event.type() == event.Type.KeyPress:
+            if event.key() == Qt.Key.Key_Escape:
+                self._clear_hints()
+                self.set_mode("normal")
+                self.setFocus(Qt.FocusReason.OtherFocusReason)
+                return True
+            text = event.text()
+            if text and text.isprintable() and len(text) == 1:
+                self.hint_key(text)
+                return True
+        return super().eventFilter(obj, event)
 
     def _hide_legend(self):
         if self._legend is not None:
@@ -1036,3 +1136,4 @@ class PdfView(QGraphicsView):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._render_visible()
+        self._place_hint_panel()

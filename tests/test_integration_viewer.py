@@ -29,7 +29,8 @@ import fixtures  # noqa: E402
 # than failing, so a bare dev box or a stripped runner does not go red on it.
 try:
     from PyQt6.QtWidgets import QApplication  # noqa: E402
-    from PyQt6.QtCore import QRectF  # noqa: E402
+    from PyQt6.QtCore import QEvent, QRectF, Qt  # noqa: E402
+    from PyQt6.QtGui import QKeyEvent  # noqa: E402
     from PyQt6.QtPdf import QPdfLinkModel  # noqa: E402
     from pdf import app as app_mod, theme, view as view_mod  # noqa: E402
     PALETTE = dict(theme.DEFAULT_PALETTE)
@@ -287,33 +288,69 @@ class ViewerCase(unittest.TestCase):
         kinds = {target[0] for target in self.view._hint_targets}
         self.assertEqual(kinds, {"link"})
 
-    def test_hint_legend_names_every_hint(self):
+    def test_hint_panel_lists_the_outline(self):
         # Painted labels cannot help when a hint has no box on the page (every outline
-        # entry) or the box is outside the visible part of a big page: the panel says
-        # which letter leads where, in window coordinates.
+        # entry) or the box is outside the visible part of a big page: the panel is the
+        # readable copy, and it keeps the chapter/sub-chapter shape.
         self.view.goto_page(2)
         self.view.run_command("hint-follow")
-        legend = self.view._legend
-        self.assertIsNotNone(legend)
-        self.assertTrue(legend.isVisible())
-        text = legend.text()
-        self.assertIn(self.view._hint_labels[0], text)
-        self.assertIn("S.2", text)
+        panel = self.view._legend
+        self.assertIsNotNone(panel)
+        self.assertTrue(panel.isVisible())
+        self.assertEqual(panel.topLevelItemCount(), 1)
+        first = panel.topLevelItem(0)
+        self.assertIn("Second page", first.text(0))
+        self.assertIn("S.2", first.text(0))
+        self.assertEqual(first.data(0, Qt.ItemDataRole.UserRole)[0], "outline")
 
-    def test_hint_legend_lists_links_too(self):
+    def test_hint_panel_is_centred_and_reads_larger_than_the_page(self):
+        self.view.goto_page(2)
+        self.view.run_command("hint-follow")
+        panel = self.view._legend
+        area = self.view.viewport().rect()
+        centre_panel = panel.geometry().center()
+        self.assertAlmostEqual(centre_panel.x(), area.center().x(), delta=4)
+        self.assertAlmostEqual(centre_panel.y(), area.center().y(), delta=4)
+        self.assertGreater(panel.font().pixelSize(), self.view.fontMetrics().height(),
+                           "the menu must be larger than the window's own text")
+        self.assertGreaterEqual(panel.width(), 320)
+        self.assertLessEqual(panel.width(), area.width())
+
+    def test_hint_panel_lists_links_flat(self):
         self._load_links()
         self.view.run_command("hint-follow")
-        text = self.view._legend.text()
-        self.assertIn("omarchy.org", text)
-        self.assertEqual(len(text.splitlines()), len(self.view._hint_labels))
+        panel = self.view._legend
+        self.assertIn("omarchy.org", panel.topLevelItem(0).text(0))
+        self.assertEqual(panel.topLevelItemCount(), len(self.view._hint_labels))
+        self.assertEqual(panel.topLevelItem(0).childCount(), 0)
 
-    def test_hint_legend_is_hidden_after_the_hint_is_taken(self):
+    def test_return_on_a_panel_row_jumps_there(self):
+        self.view.goto_page(2)
+        self.view.run_command("hint-follow")
+        self.view._panel_activated(self.view._legend.topLevelItem(0))
+        self.assertEqual(self.view.current_page(), 1)
+        self.assertEqual(self.view.mode(), "normal")
+        self.assertFalse(self.view._legend.isVisible())
+
+    def test_a_letter_typed_in_the_panel_picks_its_hint(self):
+        # The panel holds the keyboard, so the letters have to reach the hint matcher
+        # through the event filter rather than through the view.
+        self.view.goto_page(2)
+        self.view.run_command("hint-follow")
+        self.assertTrue(self.view._legend.hasFocus())
+        event = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_A,
+                          Qt.KeyboardModifier.NoModifier, self.view._hint_labels[0])
+        self.qapp.sendEvent(self.view._legend, event)
+        self.qapp.processEvents()
+        self.assertEqual(self.view.current_page(), 1)
+
+    def test_hint_panel_is_hidden_after_the_hint_is_taken(self):
         self.view.goto_page(2)
         self.view.run_command("hint-follow")
         self.view.send_keys(self.view._hint_labels[0])
         self.assertFalse(self.view._legend.isVisible())
 
-    def test_hint_legend_is_hidden_when_hint_mode_is_left(self):
+    def test_hint_panel_is_hidden_when_hint_mode_is_left(self):
         self.view.goto_page(2)
         self.view.run_command("hint-follow")
         self.view.send_keys("<Esc>")
