@@ -107,7 +107,10 @@ DEFAULT_BINDS: dict[str, dict[str, str]] = {
         "F": "hint-open",
         # the destinations as a panel you can walk. NOT "l"/"L": those are the vim motions
         # (scroll-right / bottom), and the panel must not cover the letters `f` paints.
+        # <Ctrl-t> as well as T: a chord does not need the shift key, which is awkward
+        # under magnification.
         "T": "places",
+        "<C-t>": "places",
         # navigation history
         "<C-o>": "history-back",
         "<C-i>": "history-forward",

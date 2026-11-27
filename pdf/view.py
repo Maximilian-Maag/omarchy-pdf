@@ -651,18 +651,13 @@ class PdfView(QGraphicsView):
                 if box is None or (viewport is not None and not box.intersects(viewport)):
                     continue
                 targets.append(("link", link, box, self._link_destination(link)))
-        if not targets and kind == "follow":
-            # No annotations on screen: offer the document's own structure. These have no
-            # box to paint a label on, so the status line carries the whole set — which is
-            # also what a magnified reader can actually read.
-            for row, title, page in self._outline_targets():
-                targets.append(("outline", row, None, f"S.{page + 1} {title}"[:28]))
         if not targets:
-            # Entering hint mode with nothing to point at leaves a mode that eats the
-            # next keystroke ("no such hint") and shows an empty page: say why instead.
+            # One key, one action: `f` hints links and says so when there are none in
+            # view. The document structure is not a hint - it has no box to put a letter
+            # on - and it has its own key (`<Ctrl-t>` / `T`, `:places`).
             self.messageRaised.emit(
-                "no external links in view" if kind == "open"
-                else "no links or outline in this document", "error")
+                "no external links in view" if kind == "open" else "no links in view",
+                "error")
             return
         self._hint_targets = targets
         self._hint_labels = hints_mod.generate_labels(len(targets))
@@ -703,16 +698,10 @@ class PdfView(QGraphicsView):
                 self._overlay.append(item)
             painted += 1
         if painted == 0:
-            # Not one label could be drawn: a prose page carries no link annotations, and
-            # at magnification every box on the sheet may be outside the window. Entering
-            # hint mode would leave the reader staring at an unchanged page, which reads as
-            # "the key does nothing" - so hand them the destinations as the panel instead.
+            # Should not happen - targets are only collected for boxes inside the view -
+            # but a mode with no visible labels would eat the next keystroke for nothing.
             self._clear_hints()
-            self.set_mode("normal")
-            if self.outline():
-                self.open_places()
-            else:
-                self.messageRaised.emit("no links or outline in this document", "error")
+            self.messageRaised.emit("no links in view", "error")
             return
         self.set_mode("hint")
         # The labels are on the page, which is where a reader who can see the page looks.

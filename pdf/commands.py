@@ -267,7 +267,7 @@ def h_clear(view, args):
 
 def h_help(view, args):
     _require(args, 0, "help")
-    view.message("j/k scroll  gg/G top/end  /search  f hints  T places  <C-n> colour  :command  q quit")
+    view.message("j/k scroll  gg/G top/end  /search  f hints  <C-t> places  <C-n> colour  :command  q quit")
 
 
 def h_night(view, args):

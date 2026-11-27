@@ -24,8 +24,8 @@ the way qutebrowser owns its interaction over QtWebEngine.
 | `r` `R` | rotate 90° cw / ccw |
 | `<Ctrl-n>` | page colour: `off` → `invert` → yellow-on-black `contrast` (the same switch as `Super+Ctrl+N`) |
 | `/` `?` | search forward / backward (then `n` `N`) |
-| `f` `F` | **hint mode** — `f` labels every link in view, `F` only the external ones; where nothing can be labelled (a prose page) the places panel opens instead, so the key never looks dead |
-| `T` | the document structure as a panel in the centre of the window, chapters nested with their sections |
+| `f` `F` | **hint mode** — `f` labels every link in view and does nothing else; `F` only the external ones. With no links in view it says `no links in view` |
+| `<Ctrl-t>` `T` | the document structure as a panel in the centre of the window, chapters nested with their sections |
 | `Up` `Down` `Right` `Left` | in that panel: walk it, open/close a chapter |
 | `Return` | in that panel: jump to the entry under the cursor |
 | *click* on a link | follow it (internal destination → jump, external URI → browser) |

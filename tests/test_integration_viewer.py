@@ -264,26 +264,32 @@ class ViewerCase(unittest.TestCase):
         self.view.messageRaised.connect(lambda text, level: said.append(text))
         return said
 
-    def test_hints_fall_back_to_the_outline_panel_on_a_page_without_links(self):
-        # A prose page carries no link annotations, so there is nothing to paint a letter
-        # on: `f` shows the outline as the panel instead of leaving the page unchanged.
+    def test_f_on_a_page_without_links_says_so_and_starts_no_mode(self):
+        # One key, one action: `f` hints links. A prose page carries no link annotations,
+        # so it says that instead of quietly doing something else.
         self.view.goto_page(2)
         self.assertFalse(self.view._link_entries(2), "page 3 of the fixture has no links")
+        said = []
+        self.view.messageRaised.connect(lambda text, level="info": said.append(text))
         self.view.run_command("hint-follow")
         self.assertEqual(self.view.mode(), "normal")
         self.assertFalse(self.view._overlay)
-        panel = self.view._legend
-        self.assertIsNotNone(panel)
-        self.assertTrue(panel.isVisible())
-        self.assertIn("Second page", panel.topLevelItem(0).text(0))
+        self.assertEqual(said, ["no links in view"])
+        self.assertIsNone(self.view._legend)
 
     def test_outline_panel_jumps_to_its_entry(self):
         self.view.goto_page(2)
-        self.view.run_command("hint-follow")
+        self.view.run_command("places")
         self.view._panel_activated(self.view._legend.topLevelItem(0))
         self.assertEqual(self.view.current_page(), 1)
 
-    def test_links_win_over_the_outline_when_the_page_has_them(self):
+    def test_ctrl_t_opens_the_places_panel(self):
+        # A chord rather than a shifted letter: easier under magnification.
+        from pdf import keymap
+        self.assertEqual(keymap.default_keymap().feed("normal", "<C-t>", ()).command, "places")
+        self.assertEqual(keymap.default_keymap().feed("normal", "T", ()).command, "places")
+
+    def test_links_are_the_only_hint_kind(self):
         external, _internal = self._load_links()
         self.view.run_command("hint-follow")
         kinds = {target[0] for target in self.view._hint_targets}
@@ -296,18 +302,6 @@ class ViewerCase(unittest.TestCase):
         self.assertEqual(self.view.mode(), "hint")
         self.assertTrue(self.view._hint_labels)
         self.assertIsNone(self.view._legend)
-
-    def test_f_opens_the_panel_when_nothing_could_be_painted(self):
-        # A prose page has no link annotations, so there is nothing to put a letter on.
-        # Falling back to the panel keeps `f` from looking like a dead key.
-        self.view.goto_page(2)
-        self.view.run_command("hint-follow")
-        self.assertEqual(self.view.mode(), "normal")
-        self.assertFalse(self.view._overlay)
-        panel = self.view._legend
-        self.assertIsNotNone(panel)
-        self.assertTrue(panel.isVisible())
-        self.assertGreater(panel.topLevelItemCount(), 0)
 
     def test_places_lists_the_outline_hierarchically(self):
         self.view.run_command("places")
@@ -607,9 +601,8 @@ class ViewerCase(unittest.TestCase):
         self.view.run_command("hint-follow")
         self.assertEqual(self.view.mode(), "normal")
         self.assertFalse(self.view._overlay)
-        # Nothing to paint and nothing to list: say so rather than enter a mode that eats
-        # the next keystroke.
-        self.assertEqual(messages, [("error", "no links or outline in this document")])
+        # Nothing to paint: say so rather than enter a mode that eats the next keystroke.
+        self.assertEqual(messages, [("error", "no links in view")])
 
     def test_hints_cover_the_visible_neighbouring_page(self):
         # Hints were collected from the current page only, so on a spread (or when the
@@ -636,7 +629,7 @@ class ViewerCase(unittest.TestCase):
         self.view.run_command("hint-follow")
         self.assertEqual(self.view.mode(), "normal")
         self.assertFalse(self.view._overlay)
-        self.assertEqual(messages[-1], ("no links or outline in this document", "error"))
+        self.assertEqual(messages[-1], ("no links in view", "error"))
 
     def test_hint_plates_stay_inside_the_viewport(self):
         # Centred on the link, but never half outside the window: a plate at the edge is

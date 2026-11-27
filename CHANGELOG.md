@@ -29,9 +29,9 @@ All notable changes to omarchy-pdf are documented here.
   `F` (external links only) keeps its strict meaning.
 - **Hint destinations were only ever shown as boxes on the page.** A magnified reader sees a
   fragment of the sheet, so the labels can be somewhere other than the visible area — and an
-  outline hint has no box to paint on at all. Where not one label can be drawn, `f` opens the
-  panel below instead of leaving the page unchanged. They are also spoken in the status line
-  (`a→S.12  s→S.31`), and the destinations have their own key: `T` (`:places`) opens them as a
+  outline entry has no box to paint on at all. They are also spoken in the status line
+  (`a→S.12  s→S.31`), and the destinations have their own keys: `<Ctrl-t>` and `T` (`:places`)
+  open them as a
   panel in the **centre** of the window, in type larger than the window's own, chapters with
   their sub-sections nested underneath. `Up`/`Down` walk it, `Right`/`Left` open and close a
   chapter, `Return` jumps to the entry, `Esc` closes. It is not `f`: a panel over the page
