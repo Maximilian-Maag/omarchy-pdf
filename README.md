@@ -22,8 +22,12 @@ the way qutebrowser owns its interaction over QtWebEngine.
 | `+` `-` `=` | zoom in / out / reset |
 | `zw` `zp` | fit width / fit page |
 | `r` `R` | rotate 90° cw / ccw |
+| `<Ctrl-n>` | page colour: `off` → `invert` → yellow-on-black `contrast` (the same switch as `Super+Ctrl+N`) |
 | `/` `?` | search forward / backward (then `n` `N`) |
-| `f` `F` | **hint mode** — `f` labels every link in view, `F` only the external ones; labels scale with the zoom |
+| `f` `F` | **hint mode** — `f` labels every link in view and does nothing else; `F` only the external ones. With no links in view it says `no links in view` |
+| `<Ctrl-t>` `T` | the document structure as a panel in the centre of the window, chapters nested with their sections |
+| `Up` `Down` `Right` `Left` | in that panel: walk it, open/close a chapter |
+| `Return` | in that panel: jump to the entry under the cursor |
 | *click* on a link | follow it (internal destination → jump, external URI → browser) |
 | `<Ctrl-o>` `<Ctrl-i>` | history back / forward |
 | `o` | open a document |
@@ -35,11 +39,12 @@ the way qutebrowser owns its interaction over QtWebEngine.
 | `:` | command line (with tab-completion) |
 | `q` | quit |
 
-Run `:` and type a command, or drive it from the shell:
+Run `:` and type a command, or drive it from the shell. `opf` is the same program under
+a name short enough to type:
 
 ```bash
-omarchy-pdf Vertrag.pdf
-omarchy-pdf Vertrag.pdf --command "goto 3; zoom-fit-width; info" --exit
+opf Vertrag.pdf
+opf Vertrag.pdf --command "goto 3; zoom-fit-width; info" --exit
 ```
 
 ## Command line

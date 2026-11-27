@@ -93,5 +93,28 @@ class MatchCase(unittest.TestCase):
         self.assertTrue(hints.is_complete(labels, labels[0]))
 
 
+class DescribeCase(unittest.TestCase):
+    def test_pairs_use_an_arrow(self):
+        self.assertEqual(hints.describe(["a", "s"], ["S.12", "S.31"]),
+                         "a\u2192S.12  s\u2192S.31")
+
+    def test_long_sets_are_cut_with_a_count(self):
+        labels = ["a", "s", "d", "f", "g", "h", "j"]
+        dests = [f"S.{i}" for i in range(1, 8)]
+        text = hints.describe(labels, dests, limit=6)
+        self.assertIn("(+1)", text)
+        self.assertNotIn("j\u2192", text)
+
+    def test_exactly_the_limit_has_no_suffix(self):
+        text = hints.describe(["a", "s"], ["S.1", "S.2"], limit=2)
+        self.assertNotIn("(+", text)
+
+    def test_zero_limit_still_names_one(self):
+        self.assertIn("a\u2192", hints.describe(["a", "s"], ["S.1", "S.2"], limit=0))
+
+    def test_empty_is_spoken_not_blank(self):
+        self.assertEqual(hints.describe([], []), "no hints")
+
+
 if __name__ == "__main__":
     unittest.main()

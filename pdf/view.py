@@ -16,17 +16,18 @@ import subprocess
 from PyQt6.QtCore import Qt, QSize, QRectF, QPointF, QTimer, QModelIndex, pyqtSignal
 from PyQt6.QtGui import (QPixmap, QImage, QPainter, QColor, QPen, QBrush, QFont, QPolygonF)
 from PyQt6.QtWidgets import (QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
-                             QGraphicsRectItem, QGraphicsSimpleTextItem, QApplication)
+                             QGraphicsRectItem, QGraphicsSimpleTextItem, QApplication,
+                             QTreeWidget, QTreeWidgetItem)
 from PyQt6.QtPdf import (QPdfDocument, QPdfSearchModel, QPdfLinkModel,
                          QPdfBookmarkModel, QPdfPageNavigator)
 
-from . import nav, keymap, hints as hints_mod
+from . import nav, keymap, hints as hints_mod, night as night_mod
 
 
 _CTRL_TOKENS = {
     Qt.Key.Key_D: "<C-d>", Qt.Key.Key_U: "<C-u>", Qt.Key.Key_F: "<C-f>",
     Qt.Key.Key_B: "<C-b>", Qt.Key.Key_O: "<C-o>", Qt.Key.Key_I: "<C-i>",
-    Qt.Key.Key_Q: "<C-q>",
+    Qt.Key.Key_Q: "<C-q>", Qt.Key.Key_N: "<C-n>",
 }
 _PLAIN_TOKENS = {
     Qt.Key.Key_Escape: "<Esc>", Qt.Key.Key_Return: "<CR>", Qt.Key.Key_Enter: "<CR>",
@@ -66,6 +67,7 @@ class PdfView(QGraphicsView):
     pageChanged = pyqtSignal(int, int)      # index, count
     zoomChanged = pyqtSignal(int)
     rotationChanged = pyqtSignal(int)
+    nightChanged = pyqtSignal(str)
     pathChanged = pyqtSignal(str)
     outlineChanged = pyqtSignal()
     promptRequested = pyqtSignal(str)
@@ -107,10 +109,12 @@ class PdfView(QGraphicsView):
         self._hint_targets: list = []
         self._hint_kind = "follow"
         self._hint_typed = ""
+        self._legend = None
         self._outline_indexes: list = []
         self._page = 0
         self._zoom = 100
         self._rotation = 0
+        self._night = "off"
         self._mode = "normal"
         self._query = ""
         self._search_index = -1
@@ -207,7 +211,7 @@ class PdfView(QGraphicsView):
             self._pages[index] = item
 
     def _page_pixmap(self, image):
-        """Composite a QtPdf page render onto opaque paper.
+        """Composite a QtPdf page render onto opaque paper, then apply the night effect.
 
         QtPdf (PDFium) returns a page with a TRANSPARENT background: a PDF usually does
         not paint the white sheet, it only draws content over it. Shown as-is, that
@@ -215,13 +219,35 @@ class PdfView(QGraphicsView):
         so a page of black text ends up black-on-black and is unreadable. Fill the sheet
         first, the way every other PDF viewer does. The colour is the palette's `paper`
         (white unless a theme overrides it).
+
+        The night effect runs last, on the composited sheet: inverting the raw PDFium
+        image would leave the paper transparent and the text floating on the theme
+        background, which is exactly the unreadable case above. The grey -> colour table
+        comes from :mod:`pdf.night`, so the arithmetic is unit-tested away from Qt.
         """
         paper = QImage(image.size(), QImage.Format.Format_RGB32)
         paper.fill(QColor(self.palette_dict.get("paper", "#ffffff")))
         painter = QPainter(paper)
         painter.drawImage(0, 0, image)
         painter.end()
+        table = night_mod.luminance_map(self._night, self.palette_dict.get("fg", "#ffd700"))
+        if table is not None:
+            paper = self._apply_luminance_table(paper, table)
         return QPixmap.fromImage(paper)
+
+    @staticmethod
+    def _apply_luminance_table(image, table):
+        """Map every pixel of `image` through a 256-entry grey -> colour table.
+
+        `Format_Grayscale8` pixels *are* their grey value, so converting that format to
+        `Indexed8` keeps the value as the palette index and swapping the palette applies
+        the table — one lookup per pixel inside Qt rather than a Python loop over a
+        million of them, which would stall the view on every page render.
+        """
+        grey = image.convertToFormat(QImage.Format.Format_Grayscale8)
+        indexed = grey.convertToFormat(QImage.Format.Format_Indexed8)
+        indexed.setColorTable([QColor(r, g, b).rgb() for (r, g, b) in table])
+        return indexed.convertToFormat(QImage.Format.Format_RGB32)
 
     def _on_scroll(self, _value):
         self._render_visible()
@@ -327,6 +353,32 @@ class PdfView(QGraphicsView):
 
     def rotation(self):
         return self._rotation
+
+    # ── night / page colour ───────────────────────────────────────────────
+    def night_effect(self):
+        return self._night
+
+    def set_night(self, effect, announce=True):
+        """Switch the page colour effect and re-render what is on screen.
+
+        Re-rendering has to happen here rather than at the next scroll: the whole point
+        is that the reader presses the key and the page in front of them changes. Dropping
+        the cached pixmaps keeps the scroll position, because the layout is untouched.
+        """
+        wanted = night_mod.normalize(effect, default=self._night)
+        if wanted == self._night:
+            return
+        self._night = wanted
+        for item in self._pages.values():
+            self._scene.removeItem(item)
+        self._pages.clear()
+        self._render_visible()
+        self.nightChanged.emit(self._night)
+        if announce:
+            self.messageRaised.emit(f"page colour: {self._night}", "info")
+
+    def toggle_night(self):
+        self.set_night(night_mod.cycle(self._night))
 
     def rotate(self, delta):
         self._rotation = nav.rotate(self._rotation, delta)
@@ -560,9 +612,33 @@ class PdfView(QGraphicsView):
         font.setPixelSize(max(12, int(round(11 * self._hint_scale()))))
         return font
 
+    def _outline_targets(self):
+        """(row, title, destination page) for every outline entry, in document order.
+
+        These are the fallback for `f` on a page with no link annotations: the entries a
+        reader actually wants to reach — a chapter, the bibliography — are in the outline,
+        not painted on the sheet in front of them. Without this, `f` on a prose page said
+        "no links in view" and hint mode was dead exactly where the reader stood.
+        """
+        targets = []
+        for row, title, page, _level in self.outline():
+            if page is not None and page >= 0:
+                targets.append((row, str(title or ""), int(page)))
+        return targets
+
+    def _link_destination(self, link):
+        """A short, speakable destination for a hint: a URL or "S. <page>"."""
+        url = self._link_url(link)
+        if url:
+            text = url.replace("https://", "").replace("http://", "").rstrip("/")
+            return text if len(text) <= 32 else text[:31] + "\u2026"
+        page = int(link.page())
+        return f"S.{page + 1}" if page >= 0 else "?"
+
     def open_hints(self, kind="follow"):
         self._clear_hints()
         if not self.page_count():
+            self.messageRaised.emit("no document loaded", "error")
             return
         self._hint_kind = kind
         viewport = self._viewport_rect()
@@ -574,13 +650,14 @@ class PdfView(QGraphicsView):
                 # screen while inflating the "N hints" count.
                 if box is None or (viewport is not None and not box.intersects(viewport)):
                     continue
-                targets.append((link, box))
+                targets.append(("link", link, box, self._link_destination(link)))
         if not targets:
-            # Entering hint mode with nothing to point at leaves a mode that eats the
-            # next keystroke ("no such hint") and shows an empty page: say why instead.
+            # One key, one action: `f` hints links and says so when there are none in
+            # view. The document structure is not a hint - it has no box to put a letter
+            # on - and it has its own key (`<Ctrl-t>` / `T`, `:places`).
             self.messageRaised.emit(
-                "no external links in view" if kind == "open"
-                else "no links in view", "error")
+                "no external links in view" if kind == "open" else "no links in view",
+                "error")
             return
         self._hint_targets = targets
         self._hint_labels = hints_mod.generate_labels(len(targets))
@@ -589,7 +666,10 @@ class PdfView(QGraphicsView):
         ink = QColor(self.palette_dict.get("bg_darker", "#101019"))
         font = self._hint_font()
         margin = max(2.0, font.pixelSize() * 0.25)
-        for label, (_link, box) in zip(self._hint_labels, targets):
+        painted = 0
+        for label, (_kind, _payload, box, _dest) in zip(self._hint_labels, targets):
+            if box is None:
+                continue
             text = QGraphicsSimpleTextItem(label)
             text.setBrush(QBrush(ink))
             text.setFont(font)
@@ -616,8 +696,37 @@ class PdfView(QGraphicsView):
                 item.setZValue(OVERLAY_Z)
                 self._scene.addItem(item)
                 self._overlay.append(item)
+            painted += 1
+        if painted == 0:
+            # Should not happen - targets are only collected for boxes inside the view -
+            # but a mode with no visible labels would eat the next keystroke for nothing.
+            self._clear_hints()
+            self.messageRaised.emit("no links in view", "error")
+            return
         self.set_mode("hint")
-        self.messageRaised.emit(f"{len(targets)} hints", "info")
+        # The labels are on the page, which is where a reader who can see the page looks.
+        # The navigable list of destinations is a separate key (`L`, `:places`) so that it
+        # can never cover the very letters it would be describing.
+        self.messageRaised.emit(
+            hints_mod.describe(self._hint_labels, [t[3] for t in targets]), "info")
+
+    def open_places(self):
+        """The document structure as a panel: walk it with the arrows, Return to jump.
+
+        Not hint mode: there are no letters to type here, only destinations to choose
+        from, so the panel keeps the keyboard for the tree itself.
+        """
+        if self._mode == "hint":
+            self._clear_hints()
+            self.set_mode("normal")
+        outline = [(row, title, page, level) for row, title, page, level in self.outline()
+                   if page is not None and page >= 0]
+        if not outline:
+            self.messageRaised.emit("no outline in this document", "error")
+            return
+        self._show_places_panel(outline)
+        self.messageRaised.emit(
+            "%d places - up/down walk, right/left open, return jumps" % len(outline), "info")
 
     def hint_key(self, key):
         """Handle a character while in hint mode; returns True if consumed."""
@@ -645,17 +754,160 @@ class PdfView(QGraphicsView):
         if index < 0:
             self.messageRaised.emit("not a hint", "error")
             return
-        link, _box = self._hint_targets[index]
+        kind, payload, _box, _dest = self._hint_targets[index]
         self._clear_hints()
         self.set_mode("normal")
-        self._activate_link(link, self._hint_kind)
+        if kind == "outline":
+            self.outline_goto(int(payload))
+        else:
+            self._activate_link(payload, self._hint_kind)
 
     def _clear_hints(self):
         self._hint_labels = []
         self._hint_targets = []
         self._hint_typed = ""
+        self._hide_legend()
         if self._mode == "hint":
             self._clear_overlay()
+
+    # ── hint panel ────────────────────────────────────────────────────────
+    def _hint_panel_widget(self):
+        """A navigable panel, centred, in window coordinates.
+
+        A hint may have no box on the page at all (every outline entry), and where it has
+        one the box can sit outside the visible slice of a big page — so the set has to be
+        readable somewhere that neither scrolls nor shrinks with the page zoom. It is a
+        tree rather than a list because the destinations are a document structure: the
+        arrows walk it, Right/Left open and close a chapter, Return jumps.
+        """
+        if self._legend is None:
+            panel = QTreeWidget(self.viewport())
+            panel.setHeaderHidden(True)
+            panel.setRootIsDecorated(True)
+            panel.setUniformRowHeights(True)
+            panel.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+            panel.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+            panel.setStyleSheet(
+                "QTreeWidget { background:%s; color:%s; border:2px solid %s;"
+                " padding:6px 10px; }"
+                "QTreeWidget::item { padding:2px 0; }"
+                "QTreeWidget::item:selected { background:%s; color:%s; }"
+                % (self.palette_dict.get("bg_dark", "#161622"),
+                   self.palette_dict.get("fg", "#ffd700"),
+                   self.palette_dict.get("accent", "#89b4fa"),
+                   self.palette_dict.get("selection", "#45475a"),
+                   self.palette_dict.get("fg_light", "#bac2de")))
+            font = QFont()
+            # Typing a hint letter narrows the set instead of reaching the tree, so the
+            # panel needs its own keyboard filter; arrows and Return stay the tree's.
+            panel.installEventFilter(self)
+            panel.itemActivated.connect(self._panel_activated)
+            # A chapter opens in place; the panel has to grow with it or the new rows
+            # land behind a scrollbar the arrow keys do not scroll.
+            panel.itemExpanded.connect(lambda *_a: self._place_hint_panel())
+            panel.itemCollapsed.connect(lambda *_a: self._place_hint_panel())
+            self._legend = panel
+        return self._legend
+
+    def _panel_font(self):
+        """Larger than the window's own font: this is the menu the reader picks from."""
+        font = QFont(self.font())
+        size = font.pixelSize()
+        if size <= 0:
+            size = int(self.fontMetrics().height())
+        font.setPixelSize(max(18, int(size * 1.6)))
+        font.setBold(False)
+        return font
+
+    def _show_places_panel(self, outline):
+        panel = self._hint_panel_widget()
+        panel.clear()
+        panel.setFont(self._panel_font())
+        # Keep the chapter/sub-chapter shape: levels come from the outline itself.
+        stack: list[tuple[int, QTreeWidgetItem]] = []
+        for row, title, page, level in outline:
+            item = QTreeWidgetItem([f"{title}   (S.{int(page) + 1})"])
+            item.setData(0, Qt.ItemDataRole.UserRole, ("outline", row))
+            while stack and stack[-1][0] >= level:
+                stack.pop()
+            if stack:
+                stack[-1][1].addChild(item)
+            else:
+                panel.addTopLevelItem(item)
+            stack.append((level, item))
+        self._place_hint_panel()
+        panel.show()
+        panel.raise_()
+        panel.setFocus(Qt.FocusReason.OtherFocusReason)
+        if panel.topLevelItemCount():
+            panel.setCurrentItem(panel.topLevelItem(0))
+
+    def _panel_rows(self):
+        """Rows the reader can actually see: top-level ones plus what is expanded."""
+        panel = self._legend
+        if panel is None:
+            return 0
+
+        def count(item):
+            visible = 1
+            if item.isExpanded():
+                for i in range(item.childCount()):
+                    visible += count(item.child(i))
+            return visible
+
+        return sum(count(panel.topLevelItem(i)) for i in range(panel.topLevelItemCount()))
+
+    def _place_hint_panel(self):
+        """Centre the panel in the window, big enough to read, never past the edges.
+
+        The height follows the rows on screen instead of filling the window: a panel that
+        covers the whole page hides the very thing the reader is choosing a chapter in.
+        """
+        panel = self._legend
+        if panel is None:
+            return
+        area = self.viewport().rect()
+        width = max(320, min(int(area.width() * 0.8), int(area.width()) - 32))
+        row_height = max(18, self._panel_font().pixelSize()) + 16
+        rows = max(5, self._panel_rows())
+        wanted = rows * row_height + 28
+        height = max(160, min(wanted, int(area.height() * 0.7), int(area.height()) - 32))
+        panel.resize(width, height)
+        panel.move(area.x() + (area.width() - width) // 2,
+                   area.y() + (area.height() - height) // 2)
+
+    def _panel_activated(self, item, _column=0):
+        """Return on a row jumps there, exactly as typing its hint label would."""
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not data:
+            return
+        kind, payload = data
+        self._clear_hints()
+        self.set_mode("normal")
+        self.setFocus(Qt.FocusReason.OtherFocusReason)
+        if kind == "outline":
+            self.outline_goto(int(payload))
+        else:
+            self._activate_link(payload, self._hint_kind)
+
+    def eventFilter(self, obj, event):
+        """Escape closes the panel; hint letters reach the matcher while hint mode runs."""
+        if obj is self._legend and event.type() == event.Type.KeyPress:
+            if event.key() == Qt.Key.Key_Escape:
+                self._hide_legend()
+                self._clear_hints()
+                self.set_mode("normal")
+                self.setFocus(Qt.FocusReason.OtherFocusReason)
+                return True
+            text = event.text()
+            if (self._mode == "hint" and text and text.isprintable() and len(text) == 1):
+                self.hint_key(text)
+                return True
+        return super().eventFilter(obj, event)
+
+    def _hide_legend(self):
+        if self._legend is not None:
+            self._legend.hide()
 
     def _clear_overlay(self):
         for item in self._overlay:
@@ -890,3 +1142,4 @@ class PdfView(QGraphicsView):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._render_visible()
+        self._place_hint_panel()

@@ -53,6 +53,11 @@ uninstall() {
 
   # 2. The helper binaries on PATH.
   local tool
+  # The short name first: it is a symlink to omarchy-pdf, so compare before that goes.
+  local short="$BIN_DIR/opf"
+  if [[ -L $short ]] && [[ "$(readlink -f "$short")" == "$(readlink -f "$BIN_DIR/omarchy-pdf")" ]]; then
+    priv rm -f "$short"; echo "  Removed $short"
+  fi
   for tool in "${BIN_TOOLS[@]}"; do
     remove_installed "$BIN_DIR/$tool" "$PLUGIN_DIR/bin/$tool"
   done
@@ -155,6 +160,20 @@ for tool in omarchy-pdf omarchy-pdf-qtpdf-compat omarchy-toggle-pdf-night omarch
     echo "  Installed $dest"
   fi
 done
+
+# `opf` is the short name: typing `omarchy-pdf` for every document is a tax on the
+# reader who opens the most documents. A symlink, so there is one implementation.
+link_opf() {
+  local dest="$BIN_DIR/opf"
+  if [[ -L $dest ]] && [[ "$(readlink -f "$dest")" == "$(readlink -f "$BIN_DIR/omarchy-pdf")" ]]; then
+    echo "  opf already linked."
+    return
+  fi
+  priv ln -sf "$BIN_DIR/omarchy-pdf" "$dest"
+  echo "  Installed $dest"
+}
+
+link_opf
 
 # ── 3. Desktop entries: QES signer + Chromium-free web-app fallback ───────────
 mkdir -p "$APP_DIR"

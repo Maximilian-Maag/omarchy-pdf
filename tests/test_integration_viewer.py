@@ -14,6 +14,9 @@ import unittest
 # Force offscreen: this drives real Qt, and inheriting the session's QT_QPA_PLATFORM makes
 # the run depend on the desktop session (that is exactly what made the JS harness flaky).
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
+# No gsettings children from the window under test: the shared night-mode key is read
+# and watched only in a real session (its parsing is unit-tested in test_unit_night).
+os.environ["OMARCHY_PDF_GSETTINGS"] = "0"
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
@@ -26,7 +29,8 @@ import fixtures  # noqa: E402
 # than failing, so a bare dev box or a stripped runner does not go red on it.
 try:
     from PyQt6.QtWidgets import QApplication  # noqa: E402
-    from PyQt6.QtCore import QRectF  # noqa: E402
+    from PyQt6.QtCore import QEvent, QRectF, Qt  # noqa: E402
+    from PyQt6.QtGui import QKeyEvent  # noqa: E402
     from PyQt6.QtPdf import QPdfLinkModel  # noqa: E402
     from pdf import app as app_mod, theme, view as view_mod  # noqa: E402
     PALETTE = dict(theme.DEFAULT_PALETTE)
@@ -202,7 +206,191 @@ class ViewerCase(unittest.TestCase):
         self._click(internal.center())
         self.assertEqual(self.view.current_page(), 1)
 
-    # ── destinations: land on the mark, not on the page top ───────────────
+    # ── page colour (night mode) ──────────────────────────────────────────
+    def _corner(self):
+        self.view.goto_page(0)
+        self.view._render_visible()
+        item = self.view._pages.get(0)
+        self.assertIsNotNone(item, "page 0 should have rendered")
+        return item.pixmap().toImage().pixelColor(2, 2)
+
+    def test_contrast_paints_the_paper_in_the_theme_foreground(self):
+        # The accessible page is yellow-on-black, not a negative: the sheet's light
+        # areas take the theme foreground, and the dark text becomes the background.
+        self.view.set_night("contrast")
+        self.assertEqual(self.view.night_effect(), "contrast")
+        pixel = self._corner()
+        expected = PALETTE["fg"]
+        self.assertEqual(("#%02x%02x%02x" % (pixel.red(), pixel.green(), pixel.blue())).lower(),
+                         expected.lower())
+        self.assertEqual(pixel.alpha(), 255, "the paper must stay opaque in every effect")
+
+    def test_invert_flips_the_paper_to_black(self):
+        self.view.set_night("invert")
+        pixel = self._corner()
+        self.assertLess(max(pixel.red(), pixel.green(), pixel.blue()), 40,
+                        "an inverted white sheet must render black")
+
+    def test_off_restores_the_paper(self):
+        self.view.set_night("contrast")
+        self.view.set_night("off")
+        pixel = self._corner()
+        self.assertGreater(min(pixel.red(), pixel.green(), pixel.blue()), 200)
+
+    def test_toggle_cycles_and_renders(self):
+        self.assertEqual(self.view.night_effect(), "off")
+        self.view.run_command("night-toggle")
+        self.assertEqual(self.view.night_effect(), "invert")
+        self.view.run_command("night-toggle")
+        self.assertEqual(self.view.night_effect(), "contrast")
+        self.view.run_command("night-toggle")
+        self.assertEqual(self.view.night_effect(), "off")
+
+    def test_night_command_takes_a_name(self):
+        self.view.run_command("night on")
+        self.assertEqual(self.view.night_effect(), "contrast")
+        self.view.run_command("night off")
+        self.assertEqual(self.view.night_effect(), "off")
+
+    def test_night_change_is_announced(self):
+        said = []
+        self.view.messageRaised.connect(lambda text, level: said.append(text))
+        self.view.set_night("contrast")
+        self.assertIn("contrast", said[-1])
+
+    # ── hints on a page with no link annotations ──────────────────────────
+    def _hint_announcement(self):
+        said = []
+        self.view.messageRaised.connect(lambda text, level: said.append(text))
+        return said
+
+    def test_f_on_a_page_without_links_says_so_and_starts_no_mode(self):
+        # One key, one action: `f` hints links. A prose page carries no link annotations,
+        # so it says that instead of quietly doing something else.
+        self.view.goto_page(2)
+        self.assertFalse(self.view._link_entries(2), "page 3 of the fixture has no links")
+        said = []
+        self.view.messageRaised.connect(lambda text, level="info": said.append(text))
+        self.view.run_command("hint-follow")
+        self.assertEqual(self.view.mode(), "normal")
+        self.assertFalse(self.view._overlay)
+        self.assertEqual(said, ["no links in view"])
+        self.assertIsNone(self.view._legend)
+
+    def test_outline_panel_jumps_to_its_entry(self):
+        self.view.goto_page(2)
+        self.view.run_command("places")
+        self.view._panel_activated(self.view._legend.topLevelItem(0))
+        self.assertEqual(self.view.current_page(), 1)
+
+    def test_ctrl_t_opens_the_places_panel(self):
+        # A chord rather than a shifted letter: easier under magnification.
+        from pdf import keymap
+        self.assertEqual(keymap.default_keymap().feed("normal", "<C-t>", ()).command, "places")
+        self.assertEqual(keymap.default_keymap().feed("normal", "T", ()).command, "places")
+
+    def test_links_are_the_only_hint_kind(self):
+        external, _internal = self._load_links()
+        self.view.run_command("hint-follow")
+        kinds = {target[0] for target in self.view._hint_targets}
+        self.assertEqual(kinds, {"link"})
+
+    def test_hints_paint_on_the_page_and_open_no_panel(self):
+        # `f` is for the page: a panel over it would cover the very letters it describes.
+        self._load_links()
+        self.view.run_command("hint-follow")
+        self.assertEqual(self.view.mode(), "hint")
+        self.assertTrue(self.view._hint_labels)
+        self.assertIsNone(self.view._legend)
+
+    def test_places_lists_the_outline_hierarchically(self):
+        self.view.run_command("places")
+        panel = self.view._legend
+        self.assertIsNotNone(panel)
+        self.assertTrue(panel.isVisible())
+        self.assertEqual(panel.topLevelItemCount(), 1)
+        first = panel.topLevelItem(0)
+        self.assertIn("Second page", first.text(0))
+        self.assertIn("S.2", first.text(0))
+        self.assertEqual(first.data(0, Qt.ItemDataRole.UserRole)[0], "outline")
+        self.assertEqual(self.view.mode(), "normal")
+
+    def test_places_panel_is_centred_and_reads_larger_than_the_page(self):
+        self.view.run_command("places")
+        panel = self.view._legend
+        area = self.view.viewport().rect()
+        centre_panel = panel.geometry().center()
+        self.assertAlmostEqual(centre_panel.x(), area.center().x(), delta=4)
+        self.assertAlmostEqual(centre_panel.y(), area.center().y(), delta=4)
+        self.assertGreater(panel.font().pixelSize(), self.view.fontMetrics().height(),
+                           "the menu must be larger than the window's own text")
+        self.assertGreaterEqual(panel.width(), 320)
+        self.assertLessEqual(panel.width(), area.width())
+
+    def test_places_panel_keeps_the_sections_under_their_chapter(self):
+        path = fixtures.write("/tmp/omarchy-pdf-nested.pdf", fixtures.nested_outline_pdf())
+        self.view.load(path)
+        self.view.run_command("places")
+        panel = self.view._legend
+        self.assertEqual(panel.topLevelItemCount(), 1)
+        chapter = panel.topLevelItem(0)
+        self.assertIn("Chapter One", chapter.text(0))
+        self.assertEqual(chapter.childCount(), 2)
+        self.assertIn("Section A", chapter.child(0).text(0))
+        self.assertIn("S.2", chapter.child(0).text(0))
+
+    def test_places_panel_grows_when_a_chapter_opens(self):
+        path = fixtures.write("/tmp/omarchy-pdf-nested2.pdf", fixtures.nested_outline_pdf())
+        self.view.load(path)
+        self.view.run_command("places")
+        panel = self.view._legend
+        self.assertEqual(self.view._panel_rows(), 1)
+        chapter = panel.topLevelItem(0)
+        self.assertFalse(chapter.isExpanded())
+        chapter.setExpanded(True)
+        self.qapp.processEvents()
+        # Every visible row has to fit: the sections must not land behind a scrollbar the
+        # tree does not scroll with the arrow keys.
+        self.assertEqual(self.view._panel_rows(), 3)
+        row_height = max(18, self.view._panel_font().pixelSize()) + 16
+        self.assertGreaterEqual(panel.height(), 3 * row_height,
+                                "the opened sections must not land behind a scrollbar")
+
+    def test_places_without_an_outline_says_so(self):
+        path = fixtures.write("/tmp/omarchy-pdf-plain.pdf", fixtures.non_a4_pdf())
+        self.view.load(path)
+        said = []
+        self.view.messageRaised.connect(lambda text, level="info": said.append(text))
+        self.view.run_command("places")
+        self.assertIn("no outline in this document", said)
+        self.assertIsNone(self.view._legend)
+
+    def test_return_on_a_place_jumps_there(self):
+        self.view.goto_page(3)
+        self.view.run_command("places")
+        self.view._panel_activated(self.view._legend.topLevelItem(0))
+        self.assertEqual(self.view.current_page(), 1)
+        self.assertEqual(self.view.mode(), "normal")
+        self.assertFalse(self.view._legend.isVisible())
+
+    def test_letters_do_not_start_hint_mode_from_the_places_panel(self):
+        # No hint letters are painted by `places`, so a letter must not switch the view
+        # into a mode that then eats the following keystrokes.
+        self.view.run_command("places")
+        event = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_A,
+                          Qt.KeyboardModifier.NoModifier, "a")
+        self.qapp.sendEvent(self.view._legend, event)
+        self.qapp.processEvents()
+        self.assertEqual(self.view.mode(), "normal")
+
+    def test_escape_closes_the_places_panel(self):
+        self.view.run_command("places")
+        event = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape,
+                          Qt.KeyboardModifier.NoModifier)
+        self.qapp.sendEvent(self.view._legend, event)
+        self.qapp.processEvents()
+        self.assertFalse(self.view._legend.isVisible())
+
     def _load_destinations(self):
         """A document whose destinations name a point, in a window shorter than a page."""
         self.window.resize(900, 380)
@@ -399,17 +587,21 @@ class ViewerCase(unittest.TestCase):
         self.assertAlmostEqual(centre.x(), external.center().x(), delta=1.0)
         self.assertAlmostEqual(centre.y(), external.center().y(), delta=1.0)
 
-    def test_hint_on_a_page_without_links_says_so(self):
+    def test_hint_on_a_page_with_no_links_and_no_outline_says_so(self):
         # Entering hint mode with nothing to point at used to show an empty page and eat
-        # the next keystroke as a bad label ("no such hint").
+        # the next keystroke as a bad label ("no such hint"). The fixture has no outline,
+        # so the fallback has nothing to offer either and the reason has to be spoken.
+        path = fixtures.write(self.tmp / "nolinks.pdf", fixtures.mixed_links_pdf())
+        self.view.load(path)
         self.view.resize(500, 400)
-        self.view.goto_page(1)
+        self.view.goto_page(1)          # page 2 carries neither links nor outline entries
         self.pump()
         messages = []
         self.view.messageRaised.connect(lambda text, level="info": messages.append((level, text)))
         self.view.run_command("hint-follow")
         self.assertEqual(self.view.mode(), "normal")
         self.assertFalse(self.view._overlay)
+        # Nothing to paint: say so rather than enter a mode that eats the next keystroke.
         self.assertEqual(messages, [("error", "no links in view")])
 
     def test_hints_cover_the_visible_neighbouring_page(self):

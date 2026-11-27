@@ -4,7 +4,50 @@ All notable changes to omarchy-pdf are documented here.
 
 ## [Unreleased]
 
+### Added
+- **Page colour: `off`, `invert` and the accessible `contrast` effect** (`<Ctrl-n>`,
+  `:night <on|off|invert|contrast|toggle>`). The page is composited onto paper first and the
+  effect is applied to that sheet, so an inverted page is black paper with light text rather
+  than transparent paper showing the dark scene behind it. `contrast` maps the sheet's light
+  areas onto the theme foreground and its dark areas onto black — yellow-on-black under the
+  stock theme — which is what makes a page readable at high magnification; a plain channel
+  flip is available as `invert`. The grey-to-colour table is built by the new pure
+  `pdf/night.py`, and the Qt side applies it as a palette swap, not a per-pixel Python loop.
+- **`Super+Ctrl+N` now reaches this viewer.** `omarchy-toggle-pdf-night` writes
+  `org.gnome.Papers night-mode`, which is Papers' key: the PDFs on this machine open in
+  omarchy-pdf, so the key did nothing visible in the app the reader was looking at. The
+  viewer reads that key at start-up and follows it live with `gsettings monitor`, so one
+  switch drives whichever reader is open. Where gsettings is absent the key is simply off, and
+  `OMARCHY_PDF_GSETTINGS=0` turns the whole wiring off for tests and bare hosts.
+
 ### Fixed
+- **`f` dead-ended on pages without link annotations.** Most prose pages of a book have no
+  annotations at all — 105 of 188 in the reference book do — so the key the workflow is built
+  around answered `no links in view` exactly where the reader stood, and there was no way to
+  reach the table of contents or the bibliography from there. `f` now falls back to the
+  document's outline: every entry becomes a label, and typing it jumps to that chapter.
+  `F` (external links only) keeps its strict meaning.
+- **Hint destinations were only ever shown as boxes on the page.** A magnified reader sees a
+  fragment of the sheet, so the labels can be somewhere other than the visible area — and an
+  outline entry has no box to paint on at all. They are also spoken in the status line
+  (`a→S.12  s→S.31`), and the destinations have their own keys: `<Ctrl-t>` and `T` (`:places`)
+  open them as a
+  panel in the **centre** of the window, in type larger than the window's own, chapters with
+  their sub-sections nested underneath. `Up`/`Down` walk it, `Right`/`Left` open and close a
+  chapter, `Return` jumps to the entry, `Esc` closes. It is not `f`: a panel over the page
+  would cover the letters `f` paints.
+- **The `:` prompt accepted nothing it could have suggested.** Typing a command meant
+  remembering its exact name. The prompt now lists what matches as you type, with each
+  command's help beside it: `Up`/`Down` choose, `Tab` completes, `Return` runs the chosen one
+  (or exactly what you typed, if it takes arguments).
+- **`omarchy-pdf` is a long name for the command you type most.** `opf` is installed as a
+  symlink to the same launcher, so both spellings exist and there is still one program.
+- **"That key did nothing" feedback expired before it could be read.** Errors (no links, no
+  outline, bad command) now stay on the status bar for ten seconds instead of five.
+- **The e2e suite skipped itself on exactly the hosts that need the QtPdf shim.** Its
+  interpreter probe ran the bare `import PyQt6.QtPdf`, which fails while the compat library
+  is not preloaded — so on this machine the whole end-to-end pass reported "skip" instead of
+  booting the app. The probe now tries the shim as well, and the real window is exercised.
 - **Internal links and outline entries jumped to the page, not to the mark.** `goto_page`
   centred the *page*, so on a page taller than the window the page top sat above the
   viewport and a heading 50 pt below it ended up off-screen: on a real 56-page book at

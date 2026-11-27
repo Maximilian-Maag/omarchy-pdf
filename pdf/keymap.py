@@ -102,9 +102,15 @@ DEFAULT_BINDS: dict[str, dict[str, str]] = {
         "?": "search-prev-prompt",
         "n": "search-next",
         "N": "search-prev",
-        # hints (follow links / annotations)
+        # hints (follow links / annotations) - the labels go on the page
         "f": "hint-follow",
         "F": "hint-open",
+        # the destinations as a panel you can walk. NOT "l"/"L": those are the vim motions
+        # (scroll-right / bottom), and the panel must not cover the letters `f` paints.
+        # <Ctrl-t> as well as T: a chord does not need the shift key, which is awkward
+        # under magnification.
+        "T": "places",
+        "<C-t>": "places",
         # navigation history
         "<C-o>": "history-back",
         "<C-i>": "history-forward",
@@ -137,6 +143,10 @@ DEFAULT_BINDS: dict[str, dict[str, str]] = {
         "C": "ocr",
         # chrome
         ":": "command-prompt",
+        # `<C-n>` cycles the page colour: off -> invert -> contrast. It is the in-app
+        # twin of `Super+Ctrl+N` (which drives org.gnome.Papers night-mode, read at
+        # start-up and watched live), so the key works whether or not gsettings is there.
+        "<C-n>": "night-toggle",
         "q": "quit",
         "<C-q>": "quit",
         "b": "sidebar-toggle",

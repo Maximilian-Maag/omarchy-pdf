@@ -97,6 +97,7 @@ pdf/                     importable package (installed under share/omarchy-pdf)
   keymap.py     PURE   modes, key-sequence parsing, the bind table, the resolver
   nav.py        PURE   page/scroll/zoom/rotation arithmetic
   hints.py      PURE   hint-label generation and matching
+  night.py      PURE   page colour effects (off/invert/contrast) and the shared night-mode key
   theme.py      PURE   Omarchy colors.toml -> palette
   commands.py   PURE   command registry, dispatch, completion (over a View protocol)
   docops.py            read-side document operations (qpdf/poppler/pdfinfo)
@@ -138,6 +139,7 @@ view.open_hints(kind="follow")      view.activate_hint(label)
 view.yank(text)                     view.open_url(url)
 view.outline() -> list[tuple[int,str,int]]   view.toggle_sidebar()
 view.outline_destination(row) -> tuple[int, QPointF | None]
+view.set_night(effect)              view.night_effect() -> str   view.toggle_night()
 view.load(path, password=None)      view.path() -> str
 view.quit()
 ```
