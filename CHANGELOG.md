@@ -39,6 +39,8 @@ All notable changes to omarchy-pdf are documented here.
   remembering its exact name. The prompt now lists what matches as you type, with each
   command's help beside it: `Up`/`Down` choose, `Tab` completes, `Return` runs the chosen one
   (or exactly what you typed, if it takes arguments).
+- **`omarchy-pdf` is a long name for the command you type most.** `opf` is installed as a
+  symlink to the same launcher, so both spellings exist and there is still one program.
 - **"That key did nothing" feedback expired before it could be read.** Errors (no links, no
   outline, bad command) now stay on the status bar for ten seconds instead of five.
 - **The e2e suite skipped itself on exactly the hosts that need the QtPdf shim.** Its

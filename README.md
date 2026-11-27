@@ -39,11 +39,12 @@ the way qutebrowser owns its interaction over QtWebEngine.
 | `:` | command line (with tab-completion) |
 | `q` | quit |
 
-Run `:` and type a command, or drive it from the shell:
+Run `:` and type a command, or drive it from the shell. `opf` is the same program under
+a name short enough to type:
 
 ```bash
-omarchy-pdf Vertrag.pdf
-omarchy-pdf Vertrag.pdf --command "goto 3; zoom-fit-width; info" --exit
+opf Vertrag.pdf
+opf Vertrag.pdf --command "goto 3; zoom-fit-width; info" --exit
 ```
 
 ## Command line
