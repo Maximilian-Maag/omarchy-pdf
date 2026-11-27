@@ -671,6 +671,7 @@ class PdfView(QGraphicsView):
         ink = QColor(self.palette_dict.get("bg_darker", "#101019"))
         font = self._hint_font()
         margin = max(2.0, font.pixelSize() * 0.25)
+        painted = 0
         for label, (_kind, _payload, box, _dest) in zip(self._hint_labels, targets):
             if box is None:
                 continue
@@ -700,6 +701,19 @@ class PdfView(QGraphicsView):
                 item.setZValue(OVERLAY_Z)
                 self._scene.addItem(item)
                 self._overlay.append(item)
+            painted += 1
+        if painted == 0:
+            # Not one label could be drawn: a prose page carries no link annotations, and
+            # at magnification every box on the sheet may be outside the window. Entering
+            # hint mode would leave the reader staring at an unchanged page, which reads as
+            # "the key does nothing" - so hand them the destinations as the panel instead.
+            self._clear_hints()
+            self.set_mode("normal")
+            if self.outline():
+                self.open_places()
+            else:
+                self.messageRaised.emit("no links or outline in this document", "error")
+            return
         self.set_mode("hint")
         # The labels are on the page, which is where a reader who can see the page looks.
         # The navigable list of destinations is a separate key (`L`, `:places`) so that it

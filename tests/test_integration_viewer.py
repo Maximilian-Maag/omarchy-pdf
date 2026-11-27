@@ -264,22 +264,23 @@ class ViewerCase(unittest.TestCase):
         self.view.messageRaised.connect(lambda text, level: said.append(text))
         return said
 
-    def test_hints_fall_back_to_the_outline_on_a_page_without_links(self):
-        # `f` used to say "no links in view" on any prose page, which is where a reader
-        # actually stands — the outline is the only structure such a page has.
+    def test_hints_fall_back_to_the_outline_panel_on_a_page_without_links(self):
+        # A prose page carries no link annotations, so there is nothing to paint a letter
+        # on: `f` shows the outline as the panel instead of leaving the page unchanged.
         self.view.goto_page(2)
         self.assertFalse(self.view._link_entries(2), "page 3 of the fixture has no links")
-        said = self._hint_announcement()
         self.view.run_command("hint-follow")
-        self.assertEqual(self.view.mode(), "hint")
-        kinds = [target[0] for target in self.view._hint_targets]
-        self.assertEqual(set(kinds), {"outline"})
-        self.assertTrue(said and "\u2192" in said[-1], f"destinations must be spoken: {said}")
+        self.assertEqual(self.view.mode(), "normal")
+        self.assertFalse(self.view._overlay)
+        panel = self.view._legend
+        self.assertIsNotNone(panel)
+        self.assertTrue(panel.isVisible())
+        self.assertIn("Second page", panel.topLevelItem(0).text(0))
 
-    def test_outline_hint_jumps_to_its_entry(self):
+    def test_outline_panel_jumps_to_its_entry(self):
         self.view.goto_page(2)
         self.view.run_command("hint-follow")
-        self.view.send_keys(self.view._hint_labels[0])
+        self.view._panel_activated(self.view._legend.topLevelItem(0))
         self.assertEqual(self.view.current_page(), 1)
 
     def test_links_win_over_the_outline_when_the_page_has_them(self):
@@ -295,6 +296,18 @@ class ViewerCase(unittest.TestCase):
         self.assertEqual(self.view.mode(), "hint")
         self.assertTrue(self.view._hint_labels)
         self.assertIsNone(self.view._legend)
+
+    def test_f_opens_the_panel_when_nothing_could_be_painted(self):
+        # A prose page has no link annotations, so there is nothing to put a letter on.
+        # Falling back to the panel keeps `f` from looking like a dead key.
+        self.view.goto_page(2)
+        self.view.run_command("hint-follow")
+        self.assertEqual(self.view.mode(), "normal")
+        self.assertFalse(self.view._overlay)
+        panel = self.view._legend
+        self.assertIsNotNone(panel)
+        self.assertTrue(panel.isVisible())
+        self.assertGreater(panel.topLevelItemCount(), 0)
 
     def test_places_lists_the_outline_hierarchically(self):
         self.view.run_command("places")
@@ -594,6 +607,8 @@ class ViewerCase(unittest.TestCase):
         self.view.run_command("hint-follow")
         self.assertEqual(self.view.mode(), "normal")
         self.assertFalse(self.view._overlay)
+        # Nothing to paint and nothing to list: say so rather than enter a mode that eats
+        # the next keystroke.
         self.assertEqual(messages, [("error", "no links or outline in this document")])
 
     def test_hints_cover_the_visible_neighbouring_page(self):
