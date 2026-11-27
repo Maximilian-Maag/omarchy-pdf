@@ -137,6 +137,10 @@ DEFAULT_BINDS: dict[str, dict[str, str]] = {
         "C": "ocr",
         # chrome
         ":": "command-prompt",
+        # `<C-n>` cycles the page colour: off -> invert -> contrast. It is the in-app
+        # twin of `Super+Ctrl+N` (which drives org.gnome.Papers night-mode, read at
+        # start-up and watched live), so the key works whether or not gsettings is there.
+        "<C-n>": "night-toggle",
         "q": "quit",
         "<C-q>": "quit",
         "b": "sidebar-toggle",

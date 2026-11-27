@@ -14,6 +14,9 @@ import unittest
 # Force offscreen: this drives real Qt, and inheriting the session's QT_QPA_PLATFORM makes
 # the run depend on the desktop session (that is exactly what made the JS harness flaky).
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
+# No gsettings children from the window under test: the shared night-mode key is read
+# and watched only in a real session (its parsing is unit-tested in test_unit_night).
+os.environ["OMARCHY_PDF_GSETTINGS"] = "0"
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
@@ -201,6 +204,88 @@ class ViewerCase(unittest.TestCase):
         self.view.open_url = lambda url: self.fail(f"an internal link must not open {url}")
         self._click(internal.center())
         self.assertEqual(self.view.current_page(), 1)
+
+    # ── page colour (night mode) ──────────────────────────────────────────
+    def _corner(self):
+        self.view.goto_page(0)
+        self.view._render_visible()
+        item = self.view._pages.get(0)
+        self.assertIsNotNone(item, "page 0 should have rendered")
+        return item.pixmap().toImage().pixelColor(2, 2)
+
+    def test_contrast_paints_the_paper_in_the_theme_foreground(self):
+        # The accessible page is yellow-on-black, not a negative: the sheet's light
+        # areas take the theme foreground, and the dark text becomes the background.
+        self.view.set_night("contrast")
+        self.assertEqual(self.view.night_effect(), "contrast")
+        pixel = self._corner()
+        expected = PALETTE["fg"]
+        self.assertEqual(("#%02x%02x%02x" % (pixel.red(), pixel.green(), pixel.blue())).lower(),
+                         expected.lower())
+        self.assertEqual(pixel.alpha(), 255, "the paper must stay opaque in every effect")
+
+    def test_invert_flips_the_paper_to_black(self):
+        self.view.set_night("invert")
+        pixel = self._corner()
+        self.assertLess(max(pixel.red(), pixel.green(), pixel.blue()), 40,
+                        "an inverted white sheet must render black")
+
+    def test_off_restores_the_paper(self):
+        self.view.set_night("contrast")
+        self.view.set_night("off")
+        pixel = self._corner()
+        self.assertGreater(min(pixel.red(), pixel.green(), pixel.blue()), 200)
+
+    def test_toggle_cycles_and_renders(self):
+        self.assertEqual(self.view.night_effect(), "off")
+        self.view.run_command("night-toggle")
+        self.assertEqual(self.view.night_effect(), "invert")
+        self.view.run_command("night-toggle")
+        self.assertEqual(self.view.night_effect(), "contrast")
+        self.view.run_command("night-toggle")
+        self.assertEqual(self.view.night_effect(), "off")
+
+    def test_night_command_takes_a_name(self):
+        self.view.run_command("night on")
+        self.assertEqual(self.view.night_effect(), "contrast")
+        self.view.run_command("night off")
+        self.assertEqual(self.view.night_effect(), "off")
+
+    def test_night_change_is_announced(self):
+        said = []
+        self.view.messageRaised.connect(lambda text, level: said.append(text))
+        self.view.set_night("contrast")
+        self.assertIn("contrast", said[-1])
+
+    # ── hints on a page with no link annotations ──────────────────────────
+    def _hint_announcement(self):
+        said = []
+        self.view.messageRaised.connect(lambda text, level: said.append(text))
+        return said
+
+    def test_hints_fall_back_to_the_outline_on_a_page_without_links(self):
+        # `f` used to say "no links in view" on any prose page, which is where a reader
+        # actually stands — the outline is the only structure such a page has.
+        self.view.goto_page(2)
+        self.assertFalse(self.view._link_entries(2), "page 3 of the fixture has no links")
+        said = self._hint_announcement()
+        self.view.run_command("hint-follow")
+        self.assertEqual(self.view.mode(), "hint")
+        kinds = [target[0] for target in self.view._hint_targets]
+        self.assertEqual(set(kinds), {"outline"})
+        self.assertTrue(said and "\u2192" in said[-1], f"destinations must be spoken: {said}")
+
+    def test_outline_hint_jumps_to_its_entry(self):
+        self.view.goto_page(2)
+        self.view.run_command("hint-follow")
+        self.view.send_keys(self.view._hint_labels[0])
+        self.assertEqual(self.view.current_page(), 1)
+
+    def test_links_win_over_the_outline_when_the_page_has_them(self):
+        external, _internal = self._load_links()
+        self.view.run_command("hint-follow")
+        kinds = {target[0] for target in self.view._hint_targets}
+        self.assertEqual(kinds, {"link"})
 
     # ── destinations: land on the mark, not on the page top ───────────────
     def _load_destinations(self):
@@ -399,18 +484,21 @@ class ViewerCase(unittest.TestCase):
         self.assertAlmostEqual(centre.x(), external.center().x(), delta=1.0)
         self.assertAlmostEqual(centre.y(), external.center().y(), delta=1.0)
 
-    def test_hint_on_a_page_without_links_says_so(self):
+    def test_hint_on_a_page_with_no_links_and_no_outline_says_so(self):
         # Entering hint mode with nothing to point at used to show an empty page and eat
-        # the next keystroke as a bad label ("no such hint").
+        # the next keystroke as a bad label ("no such hint"). The fixture has no outline,
+        # so the fallback has nothing to offer either and the reason has to be spoken.
+        path = fixtures.write(self.tmp / "nolinks.pdf", fixtures.mixed_links_pdf())
+        self.view.load(path)
         self.view.resize(500, 400)
-        self.view.goto_page(1)
+        self.view.goto_page(1)          # page 2 carries neither links nor outline entries
         self.pump()
         messages = []
         self.view.messageRaised.connect(lambda text, level="info": messages.append((level, text)))
         self.view.run_command("hint-follow")
         self.assertEqual(self.view.mode(), "normal")
         self.assertFalse(self.view._overlay)
-        self.assertEqual(messages, [("error", "no links in view")])
+        self.assertEqual(messages, [("error", "no links or outline in this document")])
 
     def test_hints_cover_the_visible_neighbouring_page(self):
         # Hints were collected from the current page only, so on a spread (or when the
@@ -437,7 +525,7 @@ class ViewerCase(unittest.TestCase):
         self.view.run_command("hint-follow")
         self.assertEqual(self.view.mode(), "normal")
         self.assertFalse(self.view._overlay)
-        self.assertEqual(messages[-1], ("no links in view", "error"))
+        self.assertEqual(messages[-1], ("no links or outline in this document", "error"))
 
     def test_hint_plates_stay_inside_the_viewport(self):
         # Centred on the link, but never half outside the window: a plate at the edge is

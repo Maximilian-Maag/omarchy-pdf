@@ -47,6 +47,23 @@ def matching(labels: list[str], typed: str) -> list[int]:
     return [i for i, label in enumerate(labels) if label.startswith(typed)]
 
 
+def describe(labels: list[str], destinations: list[str], limit: int = 6) -> str:
+    """One status-bar line naming what the labels lead to.
+
+    The labels are also painted on the page, but a reader who works at high
+    magnification sees one link at a time and can miss the rest entirely, so the
+    destination has to be readable as text too. Long sets are cut at `limit` with
+    a count of the rest rather than wrapping a single-line status bar.
+    """
+    if not labels:
+        return "no hints"
+    pairs = [f"{label}\u2192{dest}" for label, dest in zip(labels, destinations)]
+    shown = pairs[:max(1, limit)]
+    suffix = f"  (+{len(pairs) - len(shown)})" if len(pairs) > len(shown) else ""
+    return "  ".join(shown) + suffix
+
+
+
 def unique_match(labels: list[str], typed: str) -> int:
     """The single index whose label equals `typed`, else -1."""
     for i, label in enumerate(labels):

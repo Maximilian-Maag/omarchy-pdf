@@ -261,7 +261,23 @@ def h_clear(view, args):
 
 def h_help(view, args):
     _require(args, 0, "help")
-    view.message("j/k scroll  gg/G top/end  /search  f hint  :command  q quit")
+    view.message("j/k scroll  gg/G top/end  /search  f hint  <C-n> page colour  :command  q quit")
+
+
+def h_night(view, args):
+    """night [on|off|invert|contrast|toggle] — the page colour effect."""
+    _require(args, 1, "night <on|off|invert|contrast|toggle>")
+    name = args[0].strip().lower()
+    if name == "toggle":
+        view.toggle_night()
+        return
+    view.set_night(name)
+
+
+def h_night_toggle(view, args):
+    """night-toggle — cycle off -> invert -> contrast -> off."""
+    _require(args, 0, "night-toggle")
+    view.toggle_night()
 
 
 def _mode_command(mode: str):
@@ -342,6 +358,8 @@ _COMMANDS: list[Command] = [
     Command("redact", _doc_op("redact"), "redact a region"),
     Command("ocr", _doc_op("ocr"), "OCR the document"),
     # chrome
+    Command("night", h_night, "night <on|off|invert|contrast|toggle>", minimum=1),
+    Command("night-toggle", h_night_toggle, "cycle the page colour effect"),
     Command("command-prompt", h_command_prompt, "open the command line"),
     Command("prompt-cancel", _prompt_action("cancel"), "cancel the prompt"),
     Command("prompt-accept", _prompt_action("accept"), "accept the prompt"),

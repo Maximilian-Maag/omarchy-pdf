@@ -9,16 +9,25 @@ set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 # Pick an interpreter that actually has PyQt6.QtPdf (the system python may; a
-# mise/pyenv python may not; CI installs the PyQt6 wheel). Where none exists the
-# suite SKIPS rather than failing, matching the other environment-gated e2e.
+# mise/pyenv python may not; CI installs the PyQt6 wheel). A PyQt6 built against a
+# newer Qt than libQt6Pdf cannot import the module at all until the compat shim is
+# preloaded, which is the state of every host where the launcher needs that shim —
+# probing only the bare import skipped this suite exactly there.
 PY="${OMARCHY_PDF_TEST_PYTHON:-}"
+COMPAT="$REPO/bin/omarchy-pdf-qtpdf-compat"
 if [[ -z $PY ]]; then
   for candidate in /usr/bin/python3 python3; do
     if "$candidate" -c 'import PyQt6.QtPdf' >/dev/null 2>&1; then PY="$candidate"; break; fi
+    shim="$(bash "$COMPAT" preload "$candidate" 2>/dev/null)" || shim=""
+    if [[ -n $shim ]] && LD_PRELOAD="$shim" "$candidate" -c 'import PyQt6.QtPdf' >/dev/null 2>&1; then
+      PY="$candidate"
+      export LD_PRELOAD="$shim"
+      break
+    fi
   done
 fi
 if [[ -z $PY ]]; then
-  echo "  skip: no python3 with PyQt6.QtPdf (install PyQt6 / python-pyqt6)"
+  echo "  skip: no python3 with PyQt6.QtPdf (install PyQt6 / python-pyqt6 + its QtPdf)"
   exit 0
 fi
 export QT_QPA_PLATFORM=offscreen
@@ -95,6 +104,14 @@ print("RENDERED", len(rendered))
 if rendered:
     c = rendered[0].pixmap().toImage().pixelColor(2, 2)
     print("PAPER", c.alpha(), c.red(), c.green(), c.blue())
+# Night mode is a page-colour transform on the composited sheet; the e2e checks that it
+# reaches a real render, not just that the command was accepted.
+w.set_night("contrast")
+app.processEvents()
+night = w._pages.get(0)
+if night is not None:
+    c = night.pixmap().toImage().pixelColor(2, 2)
+    print("CONTRAST", c.alpha(), c.red(), c.green(), c.blue())
 PY
 )"
 if [[ $render_out == *"RENDERED"* ]]; then
@@ -116,6 +133,15 @@ if [[ $paper == "255 "* ]]; then
   ok "page is composited on opaque paper (PAPER $paper)"
 else
   no "page background is not opaque paper (PAPER ${paper:-<none>}) - black text can be invisible on a dark theme"
+fi
+
+# 6. The page colour effect reaches a real render: under the default palette `contrast`
+#    turns the sheet into the theme foreground (fg #cdd6f4 -> 205 214 244).
+contrast="$(printf '%s\n' "$render_out" | sed -n 's/^CONTRAST //p' | tail -1)"
+if [[ $contrast == "255 205 214 244" ]]; then
+  ok "night contrast renders the paper in the theme foreground (CONTRAST $contrast)"
+else
+  no "night contrast did not recolour the page (CONTRAST ${contrast:-<none>})"
 fi
 
 echo "e2e: $pass passed, $fail failed"

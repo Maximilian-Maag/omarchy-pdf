@@ -22,8 +22,9 @@ the way qutebrowser owns its interaction over QtWebEngine.
 | `+` `-` `=` | zoom in / out / reset |
 | `zw` `zp` | fit width / fit page |
 | `r` `R` | rotate 90° cw / ccw |
+| `<Ctrl-n>` | page colour: `off` → `invert` → yellow-on-black `contrast` (the same switch as `Super+Ctrl+N`) |
 | `/` `?` | search forward / backward (then `n` `N`) |
-| `f` `F` | **hint mode** — `f` labels every link in view, `F` only the external ones; labels scale with the zoom |
+| `f` `F` | **hint mode** — `f` labels every link in view (and, on a page with no links, the outline entries), `F` only the external ones; the destinations are also listed in the status line |
 | *click* on a link | follow it (internal destination → jump, external URI → browser) |
 | `<Ctrl-o>` `<Ctrl-i>` | history back / forward |
 | `o` | open a document |

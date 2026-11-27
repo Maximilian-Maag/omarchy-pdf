@@ -20,13 +20,13 @@ from PyQt6.QtWidgets import (QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
 from PyQt6.QtPdf import (QPdfDocument, QPdfSearchModel, QPdfLinkModel,
                          QPdfBookmarkModel, QPdfPageNavigator)
 
-from . import nav, keymap, hints as hints_mod
+from . import nav, keymap, hints as hints_mod, night as night_mod
 
 
 _CTRL_TOKENS = {
     Qt.Key.Key_D: "<C-d>", Qt.Key.Key_U: "<C-u>", Qt.Key.Key_F: "<C-f>",
     Qt.Key.Key_B: "<C-b>", Qt.Key.Key_O: "<C-o>", Qt.Key.Key_I: "<C-i>",
-    Qt.Key.Key_Q: "<C-q>",
+    Qt.Key.Key_Q: "<C-q>", Qt.Key.Key_N: "<C-n>",
 }
 _PLAIN_TOKENS = {
     Qt.Key.Key_Escape: "<Esc>", Qt.Key.Key_Return: "<CR>", Qt.Key.Key_Enter: "<CR>",
@@ -66,6 +66,7 @@ class PdfView(QGraphicsView):
     pageChanged = pyqtSignal(int, int)      # index, count
     zoomChanged = pyqtSignal(int)
     rotationChanged = pyqtSignal(int)
+    nightChanged = pyqtSignal(str)
     pathChanged = pyqtSignal(str)
     outlineChanged = pyqtSignal()
     promptRequested = pyqtSignal(str)
@@ -111,6 +112,7 @@ class PdfView(QGraphicsView):
         self._page = 0
         self._zoom = 100
         self._rotation = 0
+        self._night = "off"
         self._mode = "normal"
         self._query = ""
         self._search_index = -1
@@ -207,7 +209,7 @@ class PdfView(QGraphicsView):
             self._pages[index] = item
 
     def _page_pixmap(self, image):
-        """Composite a QtPdf page render onto opaque paper.
+        """Composite a QtPdf page render onto opaque paper, then apply the night effect.
 
         QtPdf (PDFium) returns a page with a TRANSPARENT background: a PDF usually does
         not paint the white sheet, it only draws content over it. Shown as-is, that
@@ -215,13 +217,35 @@ class PdfView(QGraphicsView):
         so a page of black text ends up black-on-black and is unreadable. Fill the sheet
         first, the way every other PDF viewer does. The colour is the palette's `paper`
         (white unless a theme overrides it).
+
+        The night effect runs last, on the composited sheet: inverting the raw PDFium
+        image would leave the paper transparent and the text floating on the theme
+        background, which is exactly the unreadable case above. The grey -> colour table
+        comes from :mod:`pdf.night`, so the arithmetic is unit-tested away from Qt.
         """
         paper = QImage(image.size(), QImage.Format.Format_RGB32)
         paper.fill(QColor(self.palette_dict.get("paper", "#ffffff")))
         painter = QPainter(paper)
         painter.drawImage(0, 0, image)
         painter.end()
+        table = night_mod.luminance_map(self._night, self.palette_dict.get("fg", "#ffd700"))
+        if table is not None:
+            paper = self._apply_luminance_table(paper, table)
         return QPixmap.fromImage(paper)
+
+    @staticmethod
+    def _apply_luminance_table(image, table):
+        """Map every pixel of `image` through a 256-entry grey -> colour table.
+
+        `Format_Grayscale8` pixels *are* their grey value, so converting that format to
+        `Indexed8` keeps the value as the palette index and swapping the palette applies
+        the table — one lookup per pixel inside Qt rather than a Python loop over a
+        million of them, which would stall the view on every page render.
+        """
+        grey = image.convertToFormat(QImage.Format.Format_Grayscale8)
+        indexed = grey.convertToFormat(QImage.Format.Format_Indexed8)
+        indexed.setColorTable([QColor(r, g, b).rgb() for (r, g, b) in table])
+        return indexed.convertToFormat(QImage.Format.Format_RGB32)
 
     def _on_scroll(self, _value):
         self._render_visible()
@@ -327,6 +351,32 @@ class PdfView(QGraphicsView):
 
     def rotation(self):
         return self._rotation
+
+    # ── night / page colour ───────────────────────────────────────────────
+    def night_effect(self):
+        return self._night
+
+    def set_night(self, effect, announce=True):
+        """Switch the page colour effect and re-render what is on screen.
+
+        Re-rendering has to happen here rather than at the next scroll: the whole point
+        is that the reader presses the key and the page in front of them changes. Dropping
+        the cached pixmaps keeps the scroll position, because the layout is untouched.
+        """
+        wanted = night_mod.normalize(effect, default=self._night)
+        if wanted == self._night:
+            return
+        self._night = wanted
+        for item in self._pages.values():
+            self._scene.removeItem(item)
+        self._pages.clear()
+        self._render_visible()
+        self.nightChanged.emit(self._night)
+        if announce:
+            self.messageRaised.emit(f"page colour: {self._night}", "info")
+
+    def toggle_night(self):
+        self.set_night(night_mod.cycle(self._night))
 
     def rotate(self, delta):
         self._rotation = nav.rotate(self._rotation, delta)
@@ -560,9 +610,33 @@ class PdfView(QGraphicsView):
         font.setPixelSize(max(12, int(round(11 * self._hint_scale()))))
         return font
 
+    def _outline_targets(self):
+        """(row, title, destination page) for every outline entry, in document order.
+
+        These are the fallback for `f` on a page with no link annotations: the entries a
+        reader actually wants to reach — a chapter, the bibliography — are in the outline,
+        not painted on the sheet in front of them. Without this, `f` on a prose page said
+        "no links in view" and hint mode was dead exactly where the reader stood.
+        """
+        targets = []
+        for row, title, page, _level in self.outline():
+            if page is not None and page >= 0:
+                targets.append((row, str(title or ""), int(page)))
+        return targets
+
+    def _link_destination(self, link):
+        """A short, speakable destination for a hint: a URL or "S. <page>"."""
+        url = self._link_url(link)
+        if url:
+            text = url.replace("https://", "").replace("http://", "").rstrip("/")
+            return text if len(text) <= 32 else text[:31] + "\u2026"
+        page = int(link.page())
+        return f"S.{page + 1}" if page >= 0 else "?"
+
     def open_hints(self, kind="follow"):
         self._clear_hints()
         if not self.page_count():
+            self.messageRaised.emit("no document loaded", "error")
             return
         self._hint_kind = kind
         viewport = self._viewport_rect()
@@ -574,13 +648,19 @@ class PdfView(QGraphicsView):
                 # screen while inflating the "N hints" count.
                 if box is None or (viewport is not None and not box.intersects(viewport)):
                     continue
-                targets.append((link, box))
+                targets.append(("link", link, box, self._link_destination(link)))
+        if not targets and kind == "follow":
+            # No annotations on screen: offer the document's own structure. These have no
+            # box to paint a label on, so the status line carries the whole set — which is
+            # also what a magnified reader can actually read.
+            for row, title, page in self._outline_targets():
+                targets.append(("outline", row, None, f"S.{page + 1} {title}"[:28]))
         if not targets:
             # Entering hint mode with nothing to point at leaves a mode that eats the
             # next keystroke ("no such hint") and shows an empty page: say why instead.
             self.messageRaised.emit(
                 "no external links in view" if kind == "open"
-                else "no links in view", "error")
+                else "no links or outline in this document", "error")
             return
         self._hint_targets = targets
         self._hint_labels = hints_mod.generate_labels(len(targets))
@@ -589,7 +669,9 @@ class PdfView(QGraphicsView):
         ink = QColor(self.palette_dict.get("bg_darker", "#101019"))
         font = self._hint_font()
         margin = max(2.0, font.pixelSize() * 0.25)
-        for label, (_link, box) in zip(self._hint_labels, targets):
+        for label, (_kind, _payload, box, _dest) in zip(self._hint_labels, targets):
+            if box is None:
+                continue
             text = QGraphicsSimpleTextItem(label)
             text.setBrush(QBrush(ink))
             text.setFont(font)
@@ -617,7 +699,10 @@ class PdfView(QGraphicsView):
                 self._scene.addItem(item)
                 self._overlay.append(item)
         self.set_mode("hint")
-        self.messageRaised.emit(f"{len(targets)} hints", "info")
+        # The labels are on the page, but a magnified reader sees a fragment of it: name
+        # the destinations in the status line as well, so the set is readable as text.
+        self.messageRaised.emit(
+            hints_mod.describe(self._hint_labels, [t[3] for t in targets]), "info")
 
     def hint_key(self, key):
         """Handle a character while in hint mode; returns True if consumed."""
@@ -645,10 +730,13 @@ class PdfView(QGraphicsView):
         if index < 0:
             self.messageRaised.emit("not a hint", "error")
             return
-        link, _box = self._hint_targets[index]
+        kind, payload, _box, _dest = self._hint_targets[index]
         self._clear_hints()
         self.set_mode("normal")
-        self._activate_link(link, self._hint_kind)
+        if kind == "outline":
+            self.outline_goto(int(payload))
+        else:
+            self._activate_link(payload, self._hint_kind)
 
     def _clear_hints(self):
         self._hint_labels = []

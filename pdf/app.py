@@ -8,14 +8,15 @@ them through the pure keymap and dispatches to the command layer.
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from urllib.parse import quote_plus
 
-from PyQt6.QtCore import QEvent, Qt
+from PyQt6.QtCore import QEvent, QProcess, Qt
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QDockWidget, QTreeWidget,
                              QTreeWidgetItem, QWidget, QVBoxLayout)
 
-from . import theme, view as view_mod, statusbar, commandbar
+from . import night as night_mod, theme, view as view_mod, statusbar, commandbar
 
 
 class MainWindow(QMainWindow):
@@ -52,6 +53,13 @@ class MainWindow(QMainWindow):
 
         self._wire()
         self._refresh()
+        self._night_process = None
+        # Tests drive the window offscreen and must not spawn gsettings children.
+        if os.environ.get("OMARCHY_PDF_GSETTINGS", "1") != "0":
+            effect = self._night_from_gsettings()
+            if effect:
+                self.view.set_night(effect, announce=False)
+            self._watch_night()
         if path:
             self.view.load(path)
 
@@ -71,7 +79,44 @@ class MainWindow(QMainWindow):
         self.bar.cancel.connect(self._prompt_cancel)
 
     def _message(self, text, level="info"):
-        self.status.showMessage(text.replace("\n", "  "), 5000)
+        # An error is the only feedback for "that key did nothing" (e.g. `f` on a page
+        # with no links and no outline), so it has to stay on screen longer than a
+        # confirmation — five seconds is not enough to read one at magnification.
+        self.status.showMessage(text.replace("\n", "  "), 10000 if level == "error" else 5000)
+
+    # ── night mode ────────────────────────────────────────────────────────
+    def _night_from_gsettings(self):
+        """Read the shared night-mode key: Papers and this viewer follow one switch.
+
+        `omarchy-toggle-pdf-night` writes `org.gnome.Papers night-mode` for
+        `Super+Ctrl+N`. Reading the same key is what makes that key do something in the
+        viewer the PDFs actually open in; with no gsettings on the host this stays off.
+        """
+        try:
+            out = subprocess.run(["gsettings", "get", "org.gnome.Papers", "night-mode"],
+                                 capture_output=True, text=True, timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if out.returncode != 0:
+            return None
+        return night_mod.effect_from_gsettings_get(out.stdout)
+
+    def _watch_night(self):
+        """Follow the key live, so Super+Ctrl+N recolours an open window."""
+        self._night_process = QProcess(self)
+        self._night_process.setProgram("gsettings")
+        self._night_process.setArguments(["monitor", "org.gnome.Papers", "night-mode"])
+        self._night_process.readyReadStandardOutput.connect(self._night_output)
+        self._night_process.start()
+
+    def _night_output(self):
+        if self._night_process is None:
+            return
+        chunk = bytes(self._night_process.readAllStandardOutput()).decode("utf-8", "replace")
+        for line in chunk.splitlines():
+            effect = night_mod.effect_from_gsettings_monitor(line)
+            if effect is not None and effect != self.view.night_effect():
+                self.view.set_night(effect)
 
     def _path_changed(self, path):
         self.status.set_document(path)
