@@ -108,6 +108,7 @@ class PdfView(QGraphicsView):
         self._hint_targets: list = []
         self._hint_kind = "follow"
         self._hint_typed = ""
+        self._legend = None
         self._outline_indexes: list = []
         self._page = 0
         self._zoom = 100
@@ -699,8 +700,14 @@ class PdfView(QGraphicsView):
                 self._scene.addItem(item)
                 self._overlay.append(item)
         self.set_mode("hint")
-        # The labels are on the page, but a magnified reader sees a fragment of it: name
-        # the destinations in the status line as well, so the set is readable as text.
+        # Labels painted on the page are useless on their own: a hint may have no box at
+        # all (outline entries), the boxes can sit outside the visible part of a big page,
+        # and a magnified reader cannot survey a whole sheet. The panel names every hint,
+        # in window coordinates, so it is readable whatever the zoom and wherever the page
+        # has scrolled to.
+        self._show_legend([f"{label}  {target[3]}"
+                           for label, target in zip(self._hint_labels, targets)][:14],
+                          self.font().pixelSize())
         self.messageRaised.emit(
             hints_mod.describe(self._hint_labels, [t[3] for t in targets]), "info")
 
@@ -742,8 +749,59 @@ class PdfView(QGraphicsView):
         self._hint_labels = []
         self._hint_targets = []
         self._hint_typed = ""
+        self._hide_legend()
         if self._mode == "hint":
             self._clear_overlay()
+
+    # ── hint legend ───────────────────────────────────────────────────────
+    def _legend_label(self):
+        """The legend is a child widget, i.e. it lives in window coordinates.
+
+        A hint that has no box on the page — an outline entry, which is every hint on a
+        prose page — has nowhere in the scene to put its label, and a scene item would
+        also scroll away under the reader. As a viewport child it stays where it was
+        put, keeps its own readable type size whatever the page zoom, and is text, which
+        is the only form this reader can survey.
+        """
+        if self._legend is None:
+            from PyQt6.QtWidgets import QLabel
+            self._legend = QLabel(self.viewport())
+            self._legend.setWordWrap(False)
+            self._legend.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+            # Hint mode is driven from the keyboard; the pointer must keep reaching the
+            # page (and the link under it) through the panel.
+            self._legend.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            self._legend.setStyleSheet(
+                "QLabel { background:%s; color:%s; border:1px solid %s; padding:4px 8px; }"
+                % (self.palette_dict.get("bg_dark", "#161622"),
+                   self.palette_dict.get("fg", "#ffd700"),
+                   self.palette_dict.get("accent", "#89b4fa")))
+        return self._legend
+
+    def _show_legend(self, lines, font_px):
+        label = self._legend_label()
+        label.setFont(self._legend_font(font_px))
+        label.setText("\n".join(lines))
+        label.adjustSize()
+        label.move(8, 8)
+        label.show()
+        label.raise_()
+
+    def _legend_font(self, pixel_size):
+        font = QFont()
+        font.setBold(False)
+        size = int(pixel_size)
+        if size <= 0:
+            # QFont.pixelSize() is -1 when the widget font is defined in points, which
+            # is the normal case on a desktop with a scaled font: measure it instead of
+            # falling back to a 12 px panel this reader could not read.
+            size = max(12, int(self.fontMetrics().height() * 1.1))
+        font.setPixelSize(max(12, size))
+        return font
+
+    def _hide_legend(self):
+        if self._legend is not None:
+            self._legend.hide()
 
     def _clear_overlay(self):
         for item in self._overlay:

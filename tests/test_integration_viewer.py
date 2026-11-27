@@ -287,6 +287,38 @@ class ViewerCase(unittest.TestCase):
         kinds = {target[0] for target in self.view._hint_targets}
         self.assertEqual(kinds, {"link"})
 
+    def test_hint_legend_names_every_hint(self):
+        # Painted labels cannot help when a hint has no box on the page (every outline
+        # entry) or the box is outside the visible part of a big page: the panel says
+        # which letter leads where, in window coordinates.
+        self.view.goto_page(2)
+        self.view.run_command("hint-follow")
+        legend = self.view._legend
+        self.assertIsNotNone(legend)
+        self.assertTrue(legend.isVisible())
+        text = legend.text()
+        self.assertIn(self.view._hint_labels[0], text)
+        self.assertIn("S.2", text)
+
+    def test_hint_legend_lists_links_too(self):
+        self._load_links()
+        self.view.run_command("hint-follow")
+        text = self.view._legend.text()
+        self.assertIn("omarchy.org", text)
+        self.assertEqual(len(text.splitlines()), len(self.view._hint_labels))
+
+    def test_hint_legend_is_hidden_after_the_hint_is_taken(self):
+        self.view.goto_page(2)
+        self.view.run_command("hint-follow")
+        self.view.send_keys(self.view._hint_labels[0])
+        self.assertFalse(self.view._legend.isVisible())
+
+    def test_hint_legend_is_hidden_when_hint_mode_is_left(self):
+        self.view.goto_page(2)
+        self.view.run_command("hint-follow")
+        self.view.send_keys("<Esc>")
+        self.assertFalse(self.view._legend.isVisible())
+
     # ── destinations: land on the mark, not on the page top ───────────────
     def _load_destinations(self):
         """A document whose destinations name a point, in a window shorter than a page."""
